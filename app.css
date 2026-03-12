@@ -1,0 +1,208 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: Arial, sans-serif;
+}
+
+body {
+    height: 100vh;
+    background: linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5)),
+                url("bg.jpg");
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+}
+
+.logo-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 30px;
+}
+.logo-container.vertical {
+    flex-direction: column;
+}
+
+
+.logo {
+    width: 100px;
+    height: auto;
+    filter: drop-shadow(0 0 8px #00c6ff);
+    transition: 0.3s;
+}
+
+.logo:hover {
+    transform: scale(1.1);
+}
+.container {
+    display: flex;
+    width: 90%;
+    max-width: 900px;
+    height: 500px;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(15px);
+    border-radius: 15px;
+    overflow: hidden;
+}
+
+.left-panel {
+    width: 40%;
+    padding: 40px;
+    color: white;
+    text-align: center;
+    background: rgba(0,0,0,0.2);
+}
+
+.left-panel h1 {
+    margin-bottom: 40px;
+}
+
+.btn {
+    width: 100%;
+    padding: 12px;
+    margin: 15px 0;
+    border: none;
+    border-radius: 25px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: 0.3s;
+}
+
+.login-btn {
+    background: linear-gradient(45deg, #00c6ff, #0072ff);
+    color: white;
+}
+
+.signup-btn {
+    background: linear-gradient(45deg, #ff9800, #ff5722);
+    color: white;
+}
+
+.btn:hover {
+    transform: scale(1.08);
+    box-shadow: 0 0 20px rgba(255,255,255,0.6);
+}
+
+.login-btn {
+    background: #00c6ff;
+    color: white;
+}
+
+.signup-btn {
+    background: #ff7e00;
+    color: white;
+}
+
+.btn:hover {
+    transform: scale(1.05);
+}
+
+.form-box {
+    width: 60%;
+    padding: 40px;
+    background: rgba(255,255,255,0.15);
+    backdrop-filter: blur(20px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    transition: all 0.4s ease-in-out;
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateX(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.form-box h2 {
+    margin-bottom: 20px;
+    color: white;
+}
+
+.form-box input {
+    padding: 12px;
+    margin: 12px 0;
+    border-radius: 10px;
+    border: none;
+    outline: none;
+    background: rgba(255,255,255,0.8);
+    transition: 0.3s;
+}
+
+.form-box input:focus {
+    transform: scale(1.03);
+    box-shadow: 0 0 10px #00c6ff;
+}
+
+.form-box button {
+    padding: 10px;
+    margin-top: 10px;
+    border: none;
+    border-radius: 20px;
+    background: #00c6ff;
+    color: white;
+    cursor: pointer;
+}
+
+.form-box a {
+    font-size: 14px;
+    color: white;
+    margin-top: 5px;
+}
+
+.hidden {
+    display: none;
+}
+
+body::before {
+    content: "";
+    position: absolute;
+    width: 300%;
+    height: 300%;
+    background: radial-gradient(circle, rgba(0,198,255,0.2) 10%, transparent 10%);
+    background-size: 100px 100px;
+    animation: moveBg 20s linear infinite;
+    z-index: -1;
+}
+
+@keyframes moveBg {
+    from {
+        transform: translate(0, 0);
+    }
+    to {
+        transform: translate(-200px, -200px);
+    }
+}
+.strength-container {
+    width: 100%;
+    height: 8px;
+    background: #ddd;
+    border-radius: 5px;
+    margin-top: 5px;
+}
+
+#strengthBar {
+    height: 100%;
+    width: 0%;
+    border-radius: 5px;
+    transition: 0.3s;
+}
+
+#strengthText {
+    font-size: 12px;
+    margin-top: 5px;
+    color: white;
+}
+
