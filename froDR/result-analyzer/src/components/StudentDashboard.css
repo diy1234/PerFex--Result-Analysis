@@ -1,0 +1,76 @@
+/* ── Body theme classes applied by StudentDashboard ───────────────────── */
+.sd-dark-body {
+  background: #0f172a !important;
+  color: #e2e8f0 !important;
+}
+
+.sd-light-body {
+  background: #f1f5f9 !important;
+  color: #1e293b !important;
+}
+
+/* ── Smooth theme transitions ─────────────────────────────────────────── */
+* {
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.15s ease;
+}
+
+/* ── Scrollbar styling ────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+.sd-light-body ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+
+/* ── Select dropdown theming fix (browser native) ─────────────────────── */
+select option {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+.sd-light-body select option {
+  background: #ffffff;
+  color: #1e293b;
+}
+
+/* ── Card hover lift ──────────────────────────────────────────────────── */
+[style*="border-top: 3px"]:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+}
+
+/* ── Toggle button hover ──────────────────────────────────────────────── */
+button[style*="border-radius: 24px"]:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+}
+
+/* ── Table row hover ──────────────────────────────────────────────────── */
+tbody tr:hover td {
+  background: rgba(59, 130, 246, 0.05);
+}
+
+/* ── Responsive tweaks ────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  /* Charts stacked on smaller screens */
+  [style*="gridTemplateColumns: 2fr 1fr"],
+  [style*="gridTemplateColumns: 1fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  [style*="gridTemplateColumns: repeat(auto-fit, minmax(200px, 1fr))"] {
+    grid-template-columns: 1fr 1fr !important;
+  }
+}
+
+@media (max-width: 600px) {
+  [style*="gridTemplateColumns: repeat(auto-fit, minmax(200px, 1fr))"] {
+    grid-template-columns: 1fr !important;
+  }
+}
