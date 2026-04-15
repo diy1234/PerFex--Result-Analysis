@@ -63,39 +63,54 @@ const getStatus = m => m >= 75 ? "pass" : m >= 40 ? "risk" : "fail";
 /* ════════════════════════════════════════════════════════════════════════════
    REPORTS COMPONENT
 ══════════════════════════════════════════════════════════════════════════════ */
-export default function Reports({ data = [] }) {
+export default function Reports({ data = [], analytics = [] }) {
   const [tab,            setTab]            = useState("overview");
   const [selectedCourse, setSelectedCourse] = useState("all");
   const [selectedSubject,setSelectedSubject]= useState("all");
 
-  const subjects = ["DBMS", "OS", "Data Structures", "Algorithms", "Web Development"];
-
   /* ── Filtered data ─────────────────────────────────────────────────────── */
-  const filtered = useMemo(() => {
-    let d = data;
-    if (selectedCourse !== "all") d = d.filter(s => s.course === selectedCourse);
-    return d;
+  const courseFiltered = useMemo(() => {
+    if (selectedCourse === "all") return data;
+    return data.filter((s) => String(s.course || "").toLowerCase() === String(selectedCourse).toLowerCase());
   }, [data, selectedCourse]);
+
+  const subjectSource = analytics && analytics.length > 0 ? analytics : courseFiltered;
+
+  const availableSubjects = useMemo(() => {
+    if (analytics && analytics.length > 0) {
+      return analytics.map((a) => a.name).filter(Boolean).sort();
+    }
+    const subjectSet = new Set(courseFiltered.map((s) => s.subject).filter(Boolean));
+    return Array.from(subjectSet).sort();
+  }, [analytics, courseFiltered]);
+
+  const subjectFiltered = useMemo(() => {
+    if (selectedSubject === "all") return subjectSource;
+    if (analytics && analytics.length > 0) {
+      return subjectSource.filter((a) => String(a.name || "").toLowerCase() === String(selectedSubject).toLowerCase());
+    }
+    return subjectSource.filter((s) => String(s.subject || "").toLowerCase() === String(selectedSubject).toLowerCase());
+  }, [subjectSource, selectedSubject, analytics]);
 
   /* ── Statistics ────────────────────────────────────────────────────────── */
   const stats = useMemo(() => {
-    const n     = filtered.length;
-    const total = filtered.reduce((s, x) => s + Number(x.marks || 0), 0);
+    const n     = courseFiltered.length;
+    const total = courseFiltered.reduce((s, x) => s + Number(x.marks || 0), 0);
     const avg   = n > 0 ? total / n : 0;
-    const pass  = filtered.filter(s => Number(s.marks) >= 40).length;
+    const pass  = courseFiltered.filter(s => Number(s.marks) >= 40).length;
     const fail  = n - pass;
     const pRate = n > 0 ? (pass / n) * 100 : 0;
     const grades = {
-      "A+ (90–100)": filtered.filter(s => s.marks >= 90).length,
-      "A (80–89)":   filtered.filter(s => s.marks >= 80 && s.marks < 90).length,
-      "B+ (70–79)":  filtered.filter(s => s.marks >= 70 && s.marks < 80).length,
-      "B (60–69)":   filtered.filter(s => s.marks >= 60 && s.marks < 70).length,
-      "C (50–59)":   filtered.filter(s => s.marks >= 50 && s.marks < 60).length,
-      "D (40–49)":   filtered.filter(s => s.marks >= 40 && s.marks < 50).length,
-      "F (<40)":     filtered.filter(s => s.marks < 40).length,
+      "A+ (90–100)": courseFiltered.filter(s => Number(s.marks) >= 90).length,
+      "A (80–89)":   courseFiltered.filter(s => Number(s.marks) >= 80 && Number(s.marks) < 90).length,
+      "B+ (70–79)":  courseFiltered.filter(s => Number(s.marks) >= 70 && Number(s.marks) < 80).length,
+      "B (60–69)":   courseFiltered.filter(s => Number(s.marks) >= 60 && Number(s.marks) < 70).length,
+      "C (50–59)":   courseFiltered.filter(s => Number(s.marks) >= 50 && Number(s.marks) < 60).length,
+      "D (40–49)":   courseFiltered.filter(s => Number(s.marks) >= 40 && Number(s.marks) < 50).length,
+      "F (<40)":     courseFiltered.filter(s => Number(s.marks) < 40).length,
     };
     return { n, avg, pass, fail, pRate, grades };
-  }, [filtered]);
+  }, [courseFiltered]);
 
   /* ── Chart datasets ────────────────────────────────────────────────────── */
   const gradeBarData = {
@@ -217,20 +232,28 @@ export default function Reports({ data = [] }) {
     </>
   );
 
+  const hasTrendData = courseFiltered.length > 0;
+
   /* Performance */
   const TabPerformance = () => (
     <>
       <div style={{ ...card(), marginBottom: 20 }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 16 }}>Performance Trend — Last 6 Months</div>
-        <div style={{ height: 240, position: "relative" }}>
-          <Line data={trendData} options={baseOpts()} />
-        </div>
+        {hasTrendData ? (
+          <div style={{ height: 240, position: "relative" }}>
+            <Line data={trendData} options={baseOpts()} />
+          </div>
+        ) : (
+          <div style={{ height: 240, display: "flex", alignItems: "center", justifyContent: "center", color: T.muted, fontSize: 13, textAlign: "center", padding: 20 }}>
+            No performance trend available yet. Upload marks to generate trend data.
+          </div>
+        )}
       </div>
 
       <div style={card()}>
         <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 16 }}>Student Performance Details</div>
         <div style={{ overflowX: "auto" }}>
-          {filtered.length === 0 ? (
+          {courseFiltered.length === 0 ? (
             <div style={{ padding: "40px 0", textAlign: "center", color: T.muted, fontSize: 13 }}>
               No student data available. Upload marks to see results here.
             </div>
@@ -240,7 +263,7 @@ export default function Reports({ data = [] }) {
                 <tr>{["Name","Course","Marks","Grade","Status"].map(h => <th key={h} style={th}>{h}</th>)}</tr>
               </thead>
               <tbody>
-                {filtered.map((s, i) => {
+                {courseFiltered.map((s, i) => {
                   const m = Number(s.marks || 0);
                   return (
                     <tr key={i}
@@ -266,6 +289,32 @@ export default function Reports({ data = [] }) {
   const subjectColors = [T.accent, T.success, T.warning, T.purple, T.teal];
   const subjectBadges = ["info", "pass", "risk", "purple", "teal"];
 
+  const subjectStats = useMemo(() => {
+    if (analytics && analytics.length > 0) {
+      const selected = selectedSubject === "all"
+        ? analytics
+        : analytics.filter((a) => String(a.name || "").toLowerCase() === String(selectedSubject).toLowerCase());
+
+      return selected.map((a) => ({
+        subject: a.name,
+        avg: Math.round(Number(a.avg_marks || a.avg || 0)),
+        passRate: Math.round(Number(a.pass_rate || 0)),
+      }));
+    }
+
+    const source = selectedSubject === "all" ? courseFiltered : subjectFiltered;
+    const subjectsToShow = selectedSubject === "all" ? availableSubjects : [selectedSubject];
+
+    return subjectsToShow.map((subj) => {
+      const rows = source.filter((s) => String(s.subject || "").toLowerCase() === String(subj).toLowerCase());
+      const count = rows.length;
+      const avg = count > 0 ? rows.reduce((sum, x) => sum + Number(x.marks || 0), 0) / count : 0;
+      const pass = rows.filter((s) => Number(s.marks) >= 40).length;
+      const rate = count > 0 ? (pass / count) * 100 : 0;
+      return { subject: subj, avg: Math.round(avg), passRate: Math.round(rate) };
+    });
+  }, [analytics, courseFiltered, subjectFiltered, availableSubjects, selectedSubject]);
+
   const TabSubjects = () => (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24 }}>
@@ -273,53 +322,57 @@ export default function Reports({ data = [] }) {
           <span style={label}>Filter Subject</span>
           <select style={sel} value={selectedSubject} onChange={e => setSelectedSubject(e.target.value)}>
             <option value="all">All Subjects</option>
-            {subjects.map(s => <option key={s} value={s}>{s}</option>)}
+            {availableSubjects.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 14, marginBottom: 24 }}>
-        {subjects
-          .filter(s => selectedSubject === "all" || s === selectedSubject)
-          .map((s, i) => (
-            <div key={s} style={{ ...card(), borderTop: `3px solid ${subjectColors[i % subjectColors.length]}` }}>
-              <div style={{ marginBottom: 12 }}>
-                <span style={badge(subjectBadges[i % subjectBadges.length])}>{s}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                <span style={{ fontSize: 12, color: T.muted }}>Average</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>78%</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-                <span style={{ fontSize: 12, color: T.muted }}>Pass Rate</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: T.success }}>85%</span>
-              </div>
-              {/* Mini progress bar */}
-              <div style={{ height: 4, background: T.border, borderRadius: 4 }}>
-                <div style={{ height: 4, background: subjectColors[i % subjectColors.length], borderRadius: 4, width: "85%" }} />
-              </div>
-            </div>
-          ))}
-      </div>
-
-      {/* Comparison bar chart */}
-      <div style={card()}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 16 }}>Subject Average Comparison</div>
-        <div style={{ height: 240, position: "relative" }}>
-          <Bar
-            data={{
-              labels: subjects,
-              datasets: [{
-                label: "Average %",
-                data: [78, 74, 81, 76, 83],
-                backgroundColor: subjectColors.map(c => c + "99"),
-                borderRadius: 5, barThickness: 36,
-              }],
-            }}
-            options={baseOpts()}
-          />
+      {subjectStats.length === 0 ? (
+        <div style={{ ...card(), textAlign: "center", color: T.muted, padding: 40 }}>
+          No subject data available for the selected course.
         </div>
-      </div>
+      ) : (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 14, marginBottom: 24 }}>
+            {subjectStats.map((entry, i) => (
+              <div key={entry.subject} style={{ ...card(), borderTop: `3px solid ${subjectColors[i % subjectColors.length]}` }}>
+                <div style={{ marginBottom: 12 }}>
+                  <span style={badge(subjectBadges[i % subjectBadges.length])}>{entry.subject}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                  <span style={{ fontSize: 12, color: T.muted }}>Average</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{entry.avg}%</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+                  <span style={{ fontSize: 12, color: T.muted }}>Pass Rate</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: T.success }}>{entry.passRate}%</span>
+                </div>
+                <div style={{ height: 4, background: T.border, borderRadius: 4 }}>
+                  <div style={{ height: 4, background: subjectColors[i % subjectColors.length], borderRadius: 4, width: `${entry.passRate}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div style={card()}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 16 }}>Subject Average Comparison</div>
+            <div style={{ height: 240, position: "relative" }}>
+              <Bar
+                data={{
+                  labels: subjectStats.map(s => s.subject),
+                  datasets: [{
+                    label: "Average %",
+                    data: subjectStats.map(s => s.avg),
+                    backgroundColor: subjectStats.map((_, i) => subjectColors[i % subjectColors.length] + "99"),
+                    borderRadius: 5, barThickness: 36,
+                  }],
+                }}
+                options={baseOpts()}
+              />
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 

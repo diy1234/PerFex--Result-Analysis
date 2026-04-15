@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import Navbar from "./Navbar";
 import Sidebar from "./Sidebar";
+import { studentAPI } from "../api";
 
 function ProfilePage({ setDashboard, setPage }) {
   const logout = () => setDashboard && setDashboard(null);
@@ -35,24 +36,19 @@ function ProfilePage({ setDashboard, setPage }) {
   const secondaryBtn = { background: '#eee', color: '#333', border: 'none', padding: '10px 14px', borderRadius: 6, cursor: 'pointer' };
 
   useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('profile'));
-      if (saved) {
-        setFullName(saved.fullName || "");
-        setEmail(saved.email || "");
-        setPhone(saved.phone || "");
-        setDob(saved.dob || "");
-        setGender(saved.gender || "");
-        setAddress(saved.address || "");
-        setCity(saved.city || "");
-        setStateVal(saved.stateVal || "");
-        setPincode(saved.pincode || "");
-        setProfileImage(saved.profileImage || null);
-      }
-    } catch (e) {
-      // ignore
-    }
-  }, []);
+  studentAPI.getProfile().then(p => {
+    setFullName(p.name || '');
+    setEmail(p.email || '');
+    setPhone(p.phone || '');
+    setDob(p.dob || '');
+    setGender(p.gender || '');
+    setAddress(p.address || '');
+    setCity(p.city || '');
+    setStateVal(p.state || '');
+    setPincode(p.pincode || '');
+    setProfileImage(p.profileImage || null);
+  });
+}, []);
 
   const onImageChange = (e) => {
     const file = e.target.files && e.target.files[0];
@@ -62,49 +58,48 @@ function ProfilePage({ setDashboard, setPage }) {
     reader.readAsDataURL(file);
   };
 
-  const onSave = () => {
-    if ((newPassword || confirmPassword) && newPassword !== confirmPassword) {
-      alert('Passwords do not match');
-      return;
-    }
+  const onSave = async () => {
+  if ((newPassword || confirmPassword) && newPassword !== confirmPassword) {
+    alert('Passwords do not match');
+    return;
+  }
 
-    const profile = {
-      fullName, email, phone, dob, gender,
-      address, city, stateVal, pincode,
-      rollNo, course, semester,
-      profileImage
-    };
+  await studentAPI.updateProfile({
+    name: fullName,
+    phone,
+    dob,
+    gender,
+    address,
+    city,
+    state: stateVal,
+    pincode,
+    profileImage
+  });
 
-    localStorage.setItem('profile', JSON.stringify(profile));
-    setSaveMessage('Profile saved');
-    setTimeout(() => setSaveMessage(''), 3000);
+  setSaveMessage('Profile saved');
+  setTimeout(() => setSaveMessage(''), 3000);
 
-    try {
-      window.dispatchEvent(new CustomEvent('profileUpdated', { detail: profile }));
-    } catch (e) { /* ignore */ }
-  };
+  window.dispatchEvent(
+    new CustomEvent('profileUpdated', {
+      detail: { fullName, profileImage }
+    })
+  );
+};
 
   const onCancel = () => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('profile'));
-      if (saved) {
-        setFullName(saved.fullName || "");
-        setEmail(saved.email || "");
-        setPhone(saved.phone || "");
-        setDob(saved.dob || "");
-        setGender(saved.gender || "");
-        setAddress(saved.address || "");
-        setCity(saved.city || "");
-        setStateVal(saved.stateVal || "");
-        setPincode(saved.pincode || "");
-        setProfileImage(saved.profileImage || null);
-      } else {
-        setFullName(''); setEmail(''); setPhone(''); setDob(''); setGender('');
-        setAddress(''); setCity(''); setStateVal(''); setPincode('');
-        setProfileImage(null);
-      }
-    } catch (e) { }
-  };
+  studentAPI.getProfile().then(p => {
+    setFullName(p.name || '');
+    setEmail(p.email || '');
+    setPhone(p.phone || '');
+    setDob(p.dob || '');
+    setGender(p.gender || '');
+    setAddress(p.address || '');
+    setCity(p.city || '');
+    setStateVal(p.state || '');
+    setPincode(p.pincode || '');
+    setProfileImage(p.profileImage || null);
+  });
+};
 
   return (
     <div className="dashboard">

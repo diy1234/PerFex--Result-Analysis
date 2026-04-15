@@ -1,28 +1,14 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import "./AdminDashboard.css";
+import { adminAPI } from "../api";
 
 function Teacher() {
 
-  const [teachers, setTeachers] = useState([
-    {
-      id: 1,
-      teacherId: "T01",
-      name: "Dr. Sharma",
-      course: "MCA",
-      subject: "DBMS",
-      department: "Computer Science"
-    },
-    {
-      id: 2,
-      teacherId: "T02",
-      name: "Dr. Mehta",
-      course: "MCA",
-      subject: "Algorithms",
-      department: "Computer Science"
-    }
-  ]);
+  // ✅ Updated: Empty state
+  const [teachers, setTeachers] = useState([]);
 
   const [formData, setFormData] = useState({
+    faculty_id: "",
     teacherId: "",
     name: "",
     course: "",
@@ -32,8 +18,12 @@ function Teacher() {
 
   const [search, setSearch] = useState("");
 
-  /* Handle input change */
+  // ✅ NEW: Fetch teachers from backend
+  useEffect(() => {
+    adminAPI.getUsers({ role: "faculty" }).then(setTeachers);
+  }, []);
 
+  /* Handle input change */
   const handleChange = (e) => {
     setFormData({
       ...formData,
@@ -41,21 +31,18 @@ function Teacher() {
     });
   };
 
-  /* Add teacher */
+  /* ✅ Updated: Add teacher using API */
+  const addTeacher = async () => {
 
-  const addTeacher = () => {
-
-    if (!formData.teacherId || !formData.name || !formData.course) {
+    if (!formData.faculty_id || !formData.name || !formData.course) {
       alert("Please fill all required fields");
       return;
     }
 
-    const newTeacher = {
-      id: teachers.length + 1,
-      ...formData
-    };
+    await adminAPI.createUser({ ...formData, role: "faculty", faculty_id: formData.faculty_id });
 
-    setTeachers([...teachers, newTeacher]);
+    const updated = await adminAPI.getUsers({ role: "faculty" });
+    setTeachers(updated);
 
     setFormData({
       teacherId: "",
@@ -66,17 +53,16 @@ function Teacher() {
     });
   };
 
-  /* Delete teacher */
-
-  const deleteTeacher = (id) => {
-    setTeachers(teachers.filter((teacher) => teacher.id !== id));
+  /* ✅ Updated: Delete teacher using API */
+  const deleteTeacher = async (id) => {
+    await adminAPI.deleteUser(id);
+    setTeachers(teachers.filter(t => t.id !== id));
   };
 
   /* Search filter */
-
   const filteredTeachers = teachers.filter((teacher) =>
-    teacher.name.toLowerCase().includes(search.toLowerCase()) ||
-    teacher.teacherId.toLowerCase().includes(search.toLowerCase())
+    teacher.name?.toLowerCase().includes(search.toLowerCase()) ||
+    teacher.faculty_id?.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -85,14 +71,13 @@ function Teacher() {
       <h2>Manage Teachers</h2>
 
       {/* Add Teacher Form */}
-
       <div className="teacher-form">
 
         <input
           type="text"
-          name="teacherId"
+          name="faculty_id"
           placeholder="Teacher ID"
-          value={formData.teacherId}
+          value={formData.faculty_id}
           onChange={handleChange}
         />
 
@@ -105,7 +90,6 @@ function Teacher() {
         />
 
         {/* Course Dropdown */}
-
         <select
           name="course"
           value={formData.course}
@@ -138,7 +122,6 @@ function Teacher() {
       </div>
 
       {/* Search */}
-
       <div className="search-box">
 
         <input
@@ -151,7 +134,6 @@ function Teacher() {
       </div>
 
       {/* Teacher Table */}
-
       <table className="teacher-table">
 
         <thead>
@@ -171,11 +153,11 @@ function Teacher() {
 
             <tr key={teacher.id}>
 
-              <td>{teacher.teacherId}</td>
-              <td>{teacher.name}</td>
-              <td>{teacher.course}</td>
-              <td>{teacher.subject}</td>
-              <td>{teacher.department}</td>
+              <td>{teacher.faculty_id || "-"}</td>
+              <td>{teacher.name || "-"}</td>
+              <td>{teacher.course || "-"}</td>
+              <td>{teacher.subject || "-"}</td>
+              <td>{teacher.department || "-"}</td>
 
               <td>
                 <button

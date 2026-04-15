@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import "./AdminDashboard.css";
 
 import Navbar from "./Navbar";
+import { adminAPI } from "../api";
 import Students from "./student";
 import Teacher from "./Teacher";
 import UploadResults from "./UploadResults";
@@ -33,15 +34,15 @@ const [course,setCourse] = useState("MCA");
 const [session,setSession] = useState("2024-25");
 const [darkMode, setDarkMode] = useState(true);
 
-/* LEADERBOARD FILTERS */
-
-const [leaderboardCourse, setLeaderboardCourse] = useState("MCA");
-const [leaderboardSession, setLeaderboardSession] = useState("2024-25");
-
 const [profile, setProfile] = useState({
   name: "Admin",
   profileImage: "",
 });
+
+const [stats, setStats] = useState(null);
+const [leaderboard, setLeaderboard] = useState([]);
+const [analytics, setAnalytics] = useState([]);
+const [fetchError, setFetchError] = useState(null);
 
 // Handle image upload for admin profile
 const handleImageUpload = (e) => {
@@ -70,50 +71,55 @@ const [newAnnouncement, setNewAnnouncement] = useState({
 });
 const [announcements,setAnnouncements] = useState([]);
 
-/* SAMPLE DATA */
+/* FETCH DATA */
 
-const sampleData = useMemo(
-() => [
-{ name: "Alice", course: "MCA", session: "2024-25", marks: 95 },
-{ name: "Bob", course: "MCA", session: "2024-25", marks: 82 },
-{ name: "Charlie", course: "MCA", session: "2024-25", marks: 73 },
-{ name: "Deepa", course: "MCA", session: "2024-25", marks: 64 },
-{ name: "Esha", course: "MCA", session: "2024-25", marks: 58 },
-{ name: "Frank", course: "BCA", session: "2024-25", marks: 88 },
-{ name: "Grace", course: "BCA", session: "2024-25", marks: 79 },
-{ name: "Henry", course: "BCA", session: "2024-25", marks: 71 },
-{ name: "Ivy", course: "BBA", session: "2024-25", marks: 85 },
-{ name: "Jack", course: "BBA", session: "2024-25", marks: 76 },
-{ name: "Kara", course: "BBA", session: "2024-25", marks: 68 },
-{ name: "Liam", course: "MCA", session: "2023-24", marks: 90 },
-{ name: "Mia", course: "MCA", session: "2023-24", marks: 83 },
-{ name: "Noah", course: "BCA", session: "2023-24", marks: 87 },
-{ name: "Olivia", course: "BBA", session: "2023-24", marks: 80 },
-],
-[]
-);
+const loadDashboardData = async () => {
+  try {
+    const statsRes = await adminAPI.getStats({ course });
+    setStats(statsRes);
+
+    const leaderboardRes = await adminAPI.getLeaderboard({ course });
+    setLeaderboard(leaderboardRes || []);
+
+    const analyticsRes = await adminAPI.getAnalytics({ course });
+    setAnalytics(analyticsRes || []);
+
+    const annRes = await adminAPI.getAnnouncements();
+    setAnnouncements(annRes || []);
+
+    setFetchError(null);
+  } catch (err) {
+    console.error('AdminDashboard fetch error', err);
+    setFetchError(err.message || 'Failed to load admin data');
+  }
+};
+
+useEffect(() => {
+  loadDashboardData();
+}, [course]);
 
 /* CHART DATA */
 
+const passCount = (leaderboard || []).filter((student) => Number(student.marks) >= 40).length;
+const totalCount = (leaderboard || []).length;
+const failCount = Math.max(0, totalCount - passCount);
+const passPercentageComputed = totalCount > 0 ? Math.round((passCount / totalCount) * 100) : 0;
+
 const passFailData = {
-labels:["Pass","Fail"],
-datasets:[
-{
-data:[4,1],
-backgroundColor:["#2ecc71","#e74c3c"]
-}
-]
+  labels: ["Pass","Fail"],
+  datasets: [{
+    data: [passCount, failCount],
+    backgroundColor: ["#2ecc71","#e74c3c"]
+  }]
 };
 
 const subjectData = {
-labels:["DBMS","OS","Data Structures","Algorithms"],
-datasets:[
-{
-label:"Average Marks",
-data:[78,72,75,69],
-backgroundColor:"#3498db"
-}
-]
+  labels: analytics.map(a => a.name),
+  datasets: [{
+    label: "Average Marks",
+    data: analytics.map(a => a.avg_marks),
+    backgroundColor: "#3498db"
+  }]
 };
 
 /* PROFILE EVENT */
@@ -170,26 +176,21 @@ setPage("dashboard")
 
 const postAnnouncement = () => {
   if (!newAnnouncement.message) return;
-  const announcementData = {
-    id: Date.now(),
-    title: newAnnouncement.title.trim() || "Announcement",
-    message: newAnnouncement.message,
-    course: newAnnouncement.course,
-    semester: newAnnouncement.semester,
-    subject: newAnnouncement.subject,
-    class: newAnnouncement.class,
-    date: new Date().toISOString().split("T")[0],
-  };
 
-  setAnnouncements([announcementData, ...announcements]);
-  setNewAnnouncement({
-    title: "",
-    message: "",
-    course: "MCA",
-    semester: "1",
-    subject: "DBMS",
-    class: "All",
-  });
+  adminAPI.postAnnouncement(newAnnouncement)
+    .then(() => adminAPI.getAnnouncements())
+    .then(res => {
+      setAnnouncements(res || []);
+      setNewAnnouncement({
+        title: "",
+        message: "",
+        course: "MCA",
+        semester: "1",
+        subject: "DBMS",
+        class: "All",
+      });
+    })
+    .catch(err => console.log(err));
 };
 
 /* SIDEBAR MENU */
@@ -244,41 +245,18 @@ return(
 <h2>Upload Results</h2>
 <div className="subtitle">Upload CSV exam results</div>
 </div>
-<UploadResults/>
+<UploadResults onUploadSuccess={loadDashboardData} />
 </div>
 )
 
 case "leaderboard": {
-  filteredData = sampleData.filter(
-    (student) =>
-      student.course === leaderboardCourse &&
-      student.session === leaderboardSession
-  );
   return (
     <div>
       <div className="page-header">
         <h2>Leaderboard</h2>
-        <div className="filters">
-          <select
-            value={leaderboardCourse}
-            onChange={(e) => setLeaderboardCourse(e.target.value)}
-          >
-            <option value="MCA">MCA</option>
-            <option value="BCA">BCA</option>
-            <option value="BBA">BBA</option>
-          </select>
-
-          <select
-            value={leaderboardSession}
-            onChange={(e) => setLeaderboardSession(e.target.value)}
-          >
-            <option value="2024-25">2024-25</option>
-            <option value="2023-24">2023-24</option>
-            <option value="2022-23">2022-23</option>
-          </select>
-        </div>
       </div>
-      <RankList data={filteredData} />
+
+      <RankList data={leaderboard} />
     </div>
   );
 }
@@ -367,7 +345,7 @@ return(
             <p>No announcements yet. Create your first notice.</p>
           </div>
         ) : (
-          announcements.map((ann) => (
+          (announcements || []).map((ann) => (
             <div key={ann.id} className="admin-announcement-item glass-card">
               <div className="admin-announcement-item-header">
                 <h4>{ann.title}</h4>
@@ -395,7 +373,7 @@ return(
 <h2>Reports</h2>
 <div className="subtitle">Generate and view detailed reports</div>
 </div>
-<Reports data={sampleData}/>
+<Reports data={leaderboard} analytics={analytics} />
 </div>
 )
 
@@ -418,6 +396,11 @@ return(
 <div className="subtitle">
 Overview analytics for {course} ({session})
 </div>
+{fetchError && (
+  <div className="error-message" style={{ color: '#ff6b6b', marginTop: 10 }}>
+    {fetchError}
+  </div>
+)}
 </div>
 
 {/* FILTERS */}
@@ -442,24 +425,24 @@ Overview analytics for {course} ({session})
 
 <div className="cards">
 
-<div className="card blue">
+<div className="card blue clickable-card" onClick={() => setPage('students')} style={{cursor:'pointer'}}>
 <h3>Total Students</h3>
-<p>120</p>
+<p>{stats?.total_students || 0}</p>
 </div>
 
-<div className="card green">
+<div className="card green clickable-card" onClick={() => setPage('teachers')} style={{cursor:'pointer'}}>
 <h3>Total Teachers</h3>
-<p>15</p>
+<p>{stats?.total_teachers || 0}</p>
 </div>
 
-<div className="card orange">
+<div className="card orange clickable-card" onClick={() => setPage('upload')} style={{cursor:'pointer'}}>
 <h3>Results Uploaded</h3>
-<p>6</p>
+<p>{stats?.marks_entered || 0}</p>
 </div>
 
 <div className="card dark">
 <h3>Pass Percentage</h3>
-<p>87%</p>
+<p>{passPercentageComputed}%</p>
 </div>
 
 </div>

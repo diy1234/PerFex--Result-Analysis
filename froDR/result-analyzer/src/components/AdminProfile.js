@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import "./AdminDashboard.css";
+import { adminAPI } from "../api";
 
 const ADMIN_PROFILE_KEY = "adminProfile";
 
@@ -12,16 +13,34 @@ function AdminProfile() {
     phone: "9876543210",
     profileImage: "",
   });
+  const [status, setStatus] = useState("");
 
   useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(ADMIN_PROFILE_KEY));
-      if (saved && typeof saved === "object") {
-        setProfile((prev) => ({ ...prev, ...saved }));
+    const loadProfile = async () => {
+      try {
+        const apiProfile = await adminAPI.getProfile();
+        if (apiProfile && typeof apiProfile === "object") {
+          setProfile({
+            name: apiProfile.name || "Admin",
+            email: apiProfile.email || "admin@college.edu",
+            department: apiProfile.department || "Examination Cell",
+            phone: apiProfile.phone || "9876543210",
+            profileImage: apiProfile.profileImage || "",
+          });
+          localStorage.setItem(ADMIN_PROFILE_KEY, JSON.stringify(apiProfile));
+        }
+      } catch (err) {
+        try {
+          const saved = JSON.parse(localStorage.getItem(ADMIN_PROFILE_KEY));
+          if (saved && typeof saved === "object") {
+            setProfile((prev) => ({ ...prev, ...saved }));
+          }
+        } catch (e) {
+          // ignore
+        }
       }
-    } catch (e) {
-      // ignore
-    }
+    };
+    loadProfile();
   }, []);
 
   const handleChange = (e) => {
@@ -29,11 +48,33 @@ function AdminProfile() {
     setProfile((prev) => ({ ...prev, [name]: value }));
   };
 
-  const saveProfile = () => {
+  const saveProfile = async () => {
     setEdit(false);
-    localStorage.setItem(ADMIN_PROFILE_KEY, JSON.stringify(profile));
-    window.dispatchEvent(new CustomEvent("adminProfileUpdated", { detail: profile }));
-    alert("Profile updated successfully");
+    try {
+      await adminAPI.updateProfile({
+        name: profile.name,
+        department: profile.department,
+        phone: profile.phone,
+        profileImage: profile.profileImage,
+      });
+      localStorage.setItem(ADMIN_PROFILE_KEY, JSON.stringify(profile));
+      window.dispatchEvent(new CustomEvent("adminProfileUpdated", { detail: profile }));
+      setStatus("Profile updated successfully.");
+    } catch (err) {
+      setStatus(`Failed to update profile: ${err.message || err}`);
+    }
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const imageData = reader.result;
+      setProfile((prev) => ({ ...prev, profileImage: imageData }));
+    };
+    reader.readAsDataURL(file);
   };
 
   return (
@@ -64,8 +105,7 @@ function AdminProfile() {
             type="email"
             name="email"
             value={profile.email}
-            disabled={!edit}
-            onChange={handleChange}
+            disabled
           />
 
           <label>Department</label>
@@ -81,26 +121,8 @@ function AdminProfile() {
           <input
             type="file"
             accept="image/*"
-            onChange={(e) => {
-              const file = e.target.files && e.target.files[0];
-              if (!file) return;
-
-              const reader = new FileReader();
-              reader.onload = () => {
-                const imageData = reader.result;
-                setProfile((prev) => {
-                  const next = { ...prev, profileImage: imageData };
-                  try {
-                    localStorage.setItem(ADMIN_PROFILE_KEY, JSON.stringify(next));
-                    window.dispatchEvent(new CustomEvent("adminProfileUpdated", { detail: next }));
-                  } catch (err) {
-                    // ignore storage errors (e.g., too large)
-                  }
-                  return next;
-                });
-              };
-              reader.readAsDataURL(file);
-            }}
+            disabled={!edit}
+            onChange={handleImageChange}
           />
 
           <label>Phone</label>
@@ -111,6 +133,8 @@ function AdminProfile() {
             disabled={!edit}
             onChange={handleChange}
           />
+
+          {status && <div className="profile-status">{status}</div>}
 
           <div className="profile-buttons">
             {!edit ? (

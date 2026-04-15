@@ -3,6 +3,7 @@ import { Bar, Line, Doughnut } from "react-chartjs-2";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import Sidebar from "./Sidebar";
+import { studentAPI } from "../api";
 
 import {
   Chart as ChartJS,
@@ -22,24 +23,10 @@ ChartJS.register(
   PointElement, ArcElement, Title, Tooltip, Legend
 );
 
-/* ─── localStorage helpers ──────────────────────────────────────────────── */
-const LS_CONCERNS   = "student_concerns";
-const LS_NOTIF_READ = "student_notif_read";
-
-const loadConcerns = () => {
-  try { return JSON.parse(localStorage.getItem(LS_CONCERNS)) || []; } catch { return []; }
-};
-const saveConcerns = (data) => localStorage.setItem(LS_CONCERNS, JSON.stringify(data));
-
-const loadReadIds = () => {
-  try { return JSON.parse(localStorage.getItem(LS_NOTIF_READ)) || []; } catch { return []; }
-};
-const saveReadIds = (ids) => localStorage.setItem(LS_NOTIF_READ, JSON.stringify(ids));
-
 /* ════════════════════════════════════════════════════════════════════════════
    MAIN COMPONENT
 ══════════════════════════════════════════════════════════════════════════════ */
-function StudentDashboard({ setDashboard, setPage, announcements }) {
+function StudentDashboard({ setDashboard, setPage }) {
 
   /* ── State ─────────────────────────────────────────────────────────────── */
   const [view, setView]     = useState("dashboard");
@@ -57,14 +44,39 @@ function StudentDashboard({ setDashboard, setPage, announcements }) {
   const [appliedExam,   setAppliedExam]   = useState("CIE1");
 
   // Concerns
-  const [concerns,    setConcerns]    = useState(loadConcerns);
+  const [concerns, setConcerns] = useState([]);
+
+useEffect(() => {
+  studentAPI.getConcerns().then(setConcerns);
+}, []);
   const [concernForm, setConcernForm] = useState({ subject:"", examType:"CIE1", description:"", marksObtained:"" });
   const [concernSent, setConcernSent] = useState(false);
 
+  const [summary, setSummary] = useState({ overall_pct: 0, subjects: [] });
+
   // Notifications
-  const [readIds,   setReadIds]   = useState(loadReadIds);
   const [notifOpen, setNotifOpen] = useState(false);
   const notifRef = useRef(null);
+
+  const fetchWithAuth = async (path, options = {}) => {
+    const token = localStorage.getItem('token');
+    const url = path.startsWith('http') ? path : `http://localhost:5000${path}`;
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: token ? `Bearer ${token}` : undefined,
+        ...(options.headers || {}),
+      },
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Request failed');
+    }
+
+    return res.json().catch(() => ({}));
+  };
 
   /* ── Effects ───────────────────────────────────────────────────────────── */
   useEffect(() => {
@@ -87,51 +99,57 @@ function StudentDashboard({ setDashboard, setPage, announcements }) {
   }, []);
 
   /* ── Notification helpers ──────────────────────────────────────────────── */
-  const allNotifs   = announcements || [];
-  const unreadCount = allNotifs.filter(a => !readIds.includes(a.id)).length;
+  const [announcements, setAnnouncements] = useState([]);
 
-  const markAllRead = () => {
-    const ids = allNotifs.map(a => a.id);
-    setReadIds(ids);
-    saveReadIds(ids);
+  const allNotifs = announcements || [];
+
+useEffect(() => {
+  studentAPI.getAnnouncements().then(setAnnouncements);
+}, []);
+
+  const unreadCount = allNotifs.filter(a => !a.read).length;
+
+  const markAllRead = async () => {
+    try {
+      await fetchWithAuth('/api/student/announcements/read-all', { method: 'POST' });
+      setAnnouncements(prev => prev.map(a => ({ ...a, read: 1 })));
+    } catch (err) {
+      console.error(err);
+    }
   };
 
-  const markOneRead = (id) => {
-    if (readIds.includes(id)) return;
-    const updated = [...readIds, id];
-    setReadIds(updated);
-    saveReadIds(updated);
+  const markOneRead = async (id) => {
+    const announcement = announcements.find(a => a.id === id);
+    if (!announcement || announcement.read) return;
+    try {
+      await fetchWithAuth(`/api/student/announcements/${id}/read`, { method: 'POST' });
+      setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, read: 1 } : a));
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   /* ── Concern submit ────────────────────────────────────────────────────── */
-  const submitConcern = () => {
-    if (!concernForm.subject.trim() || !concernForm.description.trim()) return;
-    const entry = {
-      id:           Date.now(),
-      student:      "Student",
-      rollNo:       "#2023001",
-      subject:      concernForm.subject,
-      examType:     concernForm.examType,
-      marksObtained:concernForm.marksObtained,
-      query:        concernForm.description,
-      status:       "Pending",
-      date:         new Date().toISOString().split("T")[0],
-    };
-    const updatedConcerns = [entry, ...concerns];
-    setConcerns(updatedConcerns);
-    saveConcerns(updatedConcerns);
+  const submitConcern = async () => {
+  if (!concernForm.subject.trim() || !concernForm.description.trim()) return;
 
-    // Write to shared key so Faculty's Student Queries section can read it
-    try {
-      const fq = JSON.parse(localStorage.getItem("student_queries")) || [];
-      fq.unshift(entry);
-      localStorage.setItem("student_queries", JSON.stringify(fq));
-    } catch {}
+  try {
+    await studentAPI.postConcern(concernForm);
 
-    setConcernForm({ subject:"", examType:"CIE1", description:"", marksObtained:"" });
     setConcernSent(true);
     setTimeout(() => setConcernSent(false), 3500);
-  };
+
+    setConcernForm({
+      subject: '',
+      examType: 'CIE1',
+      description: '',
+      marksObtained: ''
+    });
+
+  } catch (err) {
+    alert(err.message);
+  }
+};
 
   /* ── Filters ───────────────────────────────────────────────────────────── */
   const applyFilters = () => {
@@ -144,37 +162,66 @@ function StudentDashboard({ setDashboard, setPage, announcements }) {
   };
 
   /* ── Subject data ──────────────────────────────────────────────────────── */
-  const allSubjectsData = {
-    "Sem1-CIE1":      [{ name:"DBMS", marks:78 },{ name:"Operating Systems", marks:35 },{ name:"Data Structures", marks:65 },{ name:"Computer Networks", marks:72 },{ name:"AI", marks:80 }],
-    "Sem1-CIE2":      [{ name:"DBMS", marks:82 },{ name:"Operating Systems", marks:55 },{ name:"Data Structures", marks:70 },{ name:"Computer Networks", marks:68 },{ name:"AI", marks:75 }],
-    "Sem1-Internal1": [{ name:"DBMS", marks:90 },{ name:"Operating Systems", marks:60 },{ name:"Data Structures", marks:80 },{ name:"Computer Networks", marks:85 },{ name:"AI", marks:88 }],
-    "Sem1-Internal2": [{ name:"DBMS", marks:88 },{ name:"Operating Systems", marks:65 },{ name:"Data Structures", marks:78 },{ name:"Computer Networks", marks:80 },{ name:"AI", marks:92 }],
-    "Sem2-CIE1":      [{ name:"DBMS", marks:74 },{ name:"Java", marks:88 },{ name:"Algorithms", marks:62 },{ name:"Software Engineering", marks:70 },{ name:"Web Tech", marks:85 }],
-    "Sem2-CIE2":      [{ name:"DBMS", marks:79 },{ name:"Java", marks:91 },{ name:"Algorithms", marks:68 },{ name:"Software Engineering", marks:73 },{ name:"Web Tech", marks:87 }],
-    "Sem2-Internal1": [{ name:"DBMS", marks:85 },{ name:"Java", marks:95 },{ name:"Algorithms", marks:75 },{ name:"Software Engineering", marks:80 },{ name:"Web Tech", marks:90 }],
-    "Sem2-Internal2": [{ name:"DBMS", marks:82 },{ name:"Java", marks:93 },{ name:"Algorithms", marks:72 },{ name:"Software Engineering", marks:78 },{ name:"Web Tech", marks:89 }],
-    "Sem3-CIE1":      [{ name:"Machine Learning", marks:88 },{ name:"Cloud Computing", marks:76 },{ name:"Big Data", marks:70 },{ name:"NLP", marks:65 },{ name:"IoT", marks:80 }],
-    "Sem3-CIE2":      [{ name:"Machine Learning", marks:90 },{ name:"Cloud Computing", marks:79 },{ name:"Big Data", marks:74 },{ name:"NLP", marks:68 },{ name:"IoT", marks:83 }],
-    "Sem3-Internal1": [{ name:"Machine Learning", marks:93 },{ name:"Cloud Computing", marks:82 },{ name:"Big Data", marks:78 },{ name:"NLP", marks:72 },{ name:"IoT", marks:87 }],
-    "Sem3-Internal2": [{ name:"Machine Learning", marks:91 },{ name:"Cloud Computing", marks:80 },{ name:"Big Data", marks:76 },{ name:"NLP", marks:70 },{ name:"IoT", marks:85 }],
-    "Sem4-CIE1":      [{ name:"Thesis", marks:92 },{ name:"Deep Learning", marks:85 },{ name:"Blockchain", marks:78 },{ name:"Cyber Security", marks:88 },{ name:"Project", marks:95 }],
-    "Sem4-CIE2":      [{ name:"Thesis", marks:94 },{ name:"Deep Learning", marks:87 },{ name:"Blockchain", marks:80 },{ name:"Cyber Security", marks:90 },{ name:"Project", marks:96 }],
-    "Sem4-Internal1": [{ name:"Thesis", marks:96 },{ name:"Deep Learning", marks:89 },{ name:"Blockchain", marks:83 },{ name:"Cyber Security", marks:92 },{ name:"Project", marks:97 }],
-    "Sem4-Internal2": [{ name:"Thesis", marks:95 },{ name:"Deep Learning", marks:88 },{ name:"Blockchain", marks:82 },{ name:"Cyber Security", marks:91 },{ name:"Project", marks:98 }],
+  const [subjects, setSubjects] = useState([]);
+  const [loadedExamType, setLoadedExamType] = useState(appliedExam);
+
+  useEffect(() => {
+    studentAPI.getMarksSummary()
+      .then(setSummary)
+      .catch(console.error);
+
+    studentAPI.getProfile()
+      .then(profile => {
+        const courseValue = profile.course || "MCA";
+        const semesterValue = profile.semester || "Sem1";
+        setCourse(courseValue);
+        setPendingCourse(courseValue);
+        setAppliedCourse(courseValue);
+        setSem(semesterValue);
+        setPendingSem(semesterValue);
+        setAppliedSem(semesterValue);
+      })
+      .catch(console.error);
+  }, []);
+
+  const loadSubjectMarks = async (semesterValue, examValue) => {
+    try {
+      let rows = await studentAPI.getMarks({ semester: semesterValue, exam_type: examValue });
+      let type = examValue;
+      if (!rows.length && examValue !== "FULLRESULT") {
+        rows = await studentAPI.getMarks({ semester: semesterValue, exam_type: "FULLRESULT" });
+        type = "FULLRESULT";
+      }
+      setSubjects(rows.map(r => ({ name: r.subject, marks: r.marks })));
+      setLoadedExamType(type);
+    } catch (error) {
+      console.error(error);
+      setSubjects([]);
+      setLoadedExamType(examValue);
+    }
   };
 
-  const subjectsKey = `${appliedSem}-${appliedExam}`;
-  const subjects    = allSubjectsData[subjectsKey] || allSubjectsData["Sem1-CIE1"];
+  useEffect(() => {
+    loadSubjectMarks(appliedSem, appliedExam);
+  }, [appliedSem, appliedExam]);
 
-  const semesterMarks = [
-    { sem:"Sem1", cgpa:7.8 },{ sem:"Sem2", cgpa:8.0 },
-    { sem:"Sem3", cgpa:8.1 },{ sem:"Sem4", cgpa:8.2 },
-  ];
+  const semesterAverages = summary.subjects.reduce((acc, subject) => {
+    const sem = subject.semester;
+    if (!sem) return acc;
+    if (!acc[sem]) acc[sem] = { sum: 0, count: 0 };
+    acc[sem].sum += subject.avg_pct || 0;
+    acc[sem].count += 1;
+    return acc;
+  }, {});
+
+  const semesterMarks = Object.entries(semesterAverages)
+    .map(([sem, { sum, count }]) => ({ sem, cgpa: count ? Number((sum / count).toFixed(2)) : 0 }))
+    .sort((a, b) => Number(a.sem.replace(/\D/g, '')) - Number(b.sem.replace(/\D/g, '')));
 
   const weakSubjects = subjects.filter(s => s.marks < 40);
-  const avgMarks     = subjects.reduce((a, s) => a + s.marks, 0) / subjects.length;
+  const avgMarks     = subjects.length ? subjects.reduce((a, s) => a + s.marks, 0) / subjects.length : 0;
   const passCount    = subjects.filter(s => s.marks >= 40).length;
-  const failCount    = subjects.length - passCount;
+  const failCount    = subjects.length ? subjects.length - passCount : 0;
   const cgpaTrend    = semesterMarks.map(s => s.cgpa);
 
   /* ── Charts ────────────────────────────────────────────────────────────── */
@@ -197,6 +244,7 @@ function StudentDashboard({ setDashboard, setPage, announcements }) {
   const barColors = ["#3b82f6","#22c55e","#f59e0b","#a855f7","#06b6d4"];
   const barData   = { labels:subjects.map(s=>s.name), datasets:[{ label:"Marks", data:subjects.map(s=>s.marks), backgroundColor:subjects.map((_,i)=>barColors[i%barColors.length]), borderRadius:6, borderSkipped:false }] };
   const lineData  = { labels:semesterMarks.map(s=>s.sem), datasets:[{ label:"CGPA", data:semesterMarks.map(s=>s.cgpa), borderColor:"#f59e0b", backgroundColor:"rgba(245,158,11,0.1)", tension:0.4, pointBackgroundColor:"#f59e0b", pointRadius:5, fill:true }] };
+  const loadedExamLabel = loadedExamType === "FULLRESULT" ? "Final Result" : loadedExamType;
   const donutData = { labels:["Passed","Failed"], datasets:[{ data:[passCount,failCount], backgroundColor:["#22c55e","#ef4444"], borderWidth:0, hoverOffset:4 }] };
   const donutOptions = { responsive:true, cutout:"70%", plugins:{ legend:{ position:"bottom", labels:{ color:legendColor, padding:16, font:{size:12} } }, tooltip:{ backgroundColor:dark?"#1e293b":"#fff", titleColor:dark?"#e2e8f0":"#1e293b", bodyColor:dark?"#94a3b8":"#475569", borderColor:dark?"#334155":"#e2e8f0", borderWidth:1 } } };
 
@@ -358,7 +406,7 @@ function StudentDashboard({ setDashboard, setPage, announcements }) {
                         <div style={{ fontSize:13 }}>No notifications yet</div>
                       </div>
                     ) : allNotifs.map(ann => {
-                      const isUnread = !readIds.includes(ann.id);
+                      const isUnread = !ann.read;
                       return (
                         <div key={ann.id}
                           onClick={() => { markOneRead(ann.id); setNotifOpen(false); setView("announcements"); }}
@@ -418,22 +466,22 @@ function StudentDashboard({ setDashboard, setPage, announcements }) {
           {view === "dashboard" && (
             <>
               <div style={s.filtersRow}>
-                <select style={s.select} value={course} onChange={e=>setCourse(e.target.value)}><option>MCA</option></select>
-                <select style={s.select} value={semester} onChange={e=>setSem(e.target.value)}>
+                <select style={s.select} value={pendingCourse} onChange={e=>setPendingCourse(e.target.value)}><option>MCA</option></select>
+                <select style={s.select} value={pendingSem} onChange={e=>setPendingSem(e.target.value)}>
                   <option>Sem1</option><option>Sem2</option><option>Sem3</option><option>Sem4</option>
                 </select>
-                <select style={s.select} value={exam} onChange={e=>setExam(e.target.value)}>
+                <select style={s.select} value={pendingExam} onChange={e=>setPendingExam(e.target.value)}>
                   <option>CIE1</option><option>CIE2</option><option>Internal1</option><option>Internal2</option>
                 </select>
-                <button style={s.applyBtn}>Apply</button>
+                <button style={s.applyBtn} onClick={applyFilters}>Apply</button>
               </div>
 
               <div style={s.statsRow}>
                 {[
-                  { label:"CGPA",       value:"8.5", sub:`${course} · ${semester}`, accent:"#3b82f6", badge:"▲ +0.2 this sem", bc:"#22c55e" },
-                  { label:"Percentage", value:"82%", sub:"Current exam score",      accent:"#f59e0b", badge:"▼ -1.2% vs last", bc:"#ef4444" },
-                  { label:"Rank",       value:"3",   sub:"In your batch",            accent:"#22c55e", badge:"▲ +1 improved",   bc:"#22c55e" },
-                  { label:"Attendance", value:"91%", sub:"This semester",            accent:"#a855f7", badge:"▲ Regular",       bc:"#22c55e" },
+                  { label:"Average %", value:`${subjects.length ? avgMarks.toFixed(1) : 0}%`, sub:`${appliedCourse} · ${appliedSem} · ${loadedExamLabel}`, accent:"#3b82f6", badge:"Based on selected exam", bc:"#22c55e" },
+                  { label:"Subjects", value:subjects.length || 0, sub:"Current exam records", accent:"#f59e0b", badge:`${passCount} passed`, bc:"#22c55e" },
+                  { label:"Pass Rate", value:`${subjects.length ? Math.round((passCount/subjects.length)*100) : 0}%`, sub:"For selected exam", accent:"#22c55e", badge:`${failCount} fail`, bc:"#22c55e" },
+                  { label:"Weak Subjects", value:weakSubjects.length || 0, sub:"Needs attention", accent:"#a855f7", badge:"Review these subjects", bc:"#f59e0b" },
                 ].map((c,i)=>(
                   <div key={i} style={s.card(c.accent)}>
                     <div style={s.cardLabel}>{c.label}</div>
@@ -454,11 +502,11 @@ function StudentDashboard({ setDashboard, setPage, announcements }) {
                 </div>
                 <div style={s.chartBox}>
                   <div style={s.sectionTitle}>Pass / Fail Distribution</div>
-                  <div style={s.sectionSub}>{exam}</div>
+                  <div style={s.sectionSub}>{loadedExamLabel}</div>
                   <Doughnut data={donutData} options={donutOptions} />
                   <div style={{ marginTop:16, display:"flex", justifyContent:"space-between", fontSize:12 }}>
-                    <span style={{color:"#22c55e"}}>● Passed <strong>{passCount} ({Math.round(passCount/subjects.length*100)}%)</strong></span>
-                    <span style={{color:"#ef4444"}}>● Failed <strong>{failCount} ({Math.round(failCount/subjects.length*100)}%)</strong></span>
+                    <span style={{color:"#22c55e"}}>● Passed <strong>{passCount} ({subjects.length ? Math.round(passCount/subjects.length*100) : 0}%)</strong></span>
+                    <span style={{color:"#ef4444"}}>● Failed <strong>{failCount} ({subjects.length ? Math.round(failCount/subjects.length*100) : 0}%)</strong></span>
                   </div>
                 </div>
               </div>
@@ -705,7 +753,7 @@ function StudentDashboard({ setDashboard, setPage, announcements }) {
                 )}
               </div>
               {announcements && announcements.length > 0 ? announcements.map(ann => {
-                const isUnread = !readIds.includes(ann.id);
+                const isUnread = !ann.read;
                 return (
                   <div key={ann.id} onClick={()=>markOneRead(ann.id)}
                     style={{ ...s.annCard, cursor:"pointer",

@@ -1,12 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import "./Students.css";
+import { adminAPI } from "../api";
 
 function Students() {
 
-  const [students, setStudents] = useState([
-    { id: 1, enroll: "101", name: "Rahul", course: "MCA", semester: "2" },
-    { id: 2, enroll: "102", name: "Priya", course: "MCA", semester: "2" }
-  ]);
+  // ✅ Updated: Empty initial state
+  const [students, setStudents] = useState([]);
 
   const [formData, setFormData] = useState({
     enroll: "",
@@ -17,6 +16,11 @@ function Students() {
 
   const [search, setSearch] = useState("");
 
+  // ✅ NEW: Fetch students from backend
+  useEffect(() => {
+    adminAPI.getUsers({ role: "student" }).then(setStudents);
+  }, []);
+
   // Handle form input change
   const handleChange = (e) => {
     setFormData({
@@ -25,20 +29,18 @@ function Students() {
     });
   };
 
-  // Add new student
-  const addStudent = () => {
+  // ✅ Updated: Add student using API
+  const addStudent = async () => {
 
     if (!formData.enroll || !formData.name) {
       alert("Please fill all fields");
       return;
     }
 
-    const newStudent = {
-      id: students.length + 1,
-      ...formData
-    };
+    await adminAPI.createUser({ ...formData, role: "student" });
 
-    setStudents([...students, newStudent]);
+    const updated = await adminAPI.getUsers({ role: "student" });
+    setStudents(updated);
 
     setFormData({
       enroll: "",
@@ -48,15 +50,16 @@ function Students() {
     });
   };
 
-  // Delete student
-  const deleteStudent = (id) => {
-    setStudents(students.filter((student) => student.id !== id));
+  // ✅ Updated: Delete using API
+  const deleteStudent = async (id) => {
+    await adminAPI.deleteUser(id);
+    setStudents(students.filter(s => s.id !== id));
   };
 
   // Search filter
   const filteredStudents = students.filter((student) =>
-    student.name.toLowerCase().includes(search.toLowerCase()) ||
-    student.enroll.includes(search)
+    student.name?.toLowerCase().includes(search.toLowerCase()) ||
+    student.enroll?.includes(search)
   );
 
   return (
@@ -65,7 +68,6 @@ function Students() {
       <h2>Manage Students</h2>
 
       {/* Add Student Form */}
-
       <div className="student-form">
 
         <input
@@ -105,7 +107,6 @@ function Students() {
       </div>
 
       {/* Search Bar */}
-
       <div className="search-box">
 
         <input
@@ -118,7 +119,6 @@ function Students() {
       </div>
 
       {/* Student Table */}
-
       <table className="student-table">
 
         <thead>

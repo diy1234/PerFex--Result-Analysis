@@ -1,8 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Bar, Pie } from "react-chartjs-2";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import logo2 from "../logo2.png";
+import { facultyAPI } from '../api';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -236,15 +237,15 @@ const NAV = [
 export default function FacultyDashboard({ setDashboard, announcements, setAnnouncements }) {
   const [view, setView]         = useState("dashboard");
   const [course, setCourse]     = useState("MCA");
-  const [semester, setSemester] = useState("1");
+  const [semester, setSemester] = useState("Sem1");
   const [subject, setSubject]   = useState("DBMS");
   const [examType, setExamType] = useState("CIE1");
   const [editingId, setEditingId] = useState(null);
   const [editVal, setEditVal]   = useState("");
   const [facultyImage, setFacultyImage] = useState(null);
-  const [newAnnouncement, setNewAnnouncement] = useState({ title: "", message: "", course: "MCA", semester: "1", subject: "DBMS", class: "All" });
+  const [newAnnouncement, setNewAnnouncement] = useState({ title: "", message: "", course: "MCA", semester: "Sem1", subject: "DBMS", class: "All" });
   const [isDarkMode, setIsDarkMode] = useState(true);
-  const [classSection, setClassSection] = useState("A");
+  const [classSection, setClassSection] = useState("All");
   const [filterApplied, setFilterApplied] = useState(false);
   const [uploadApplyClicked, setUploadApplyClicked] = useState(false);
   const [uploadFiltersApplied, setUploadFiltersApplied] = useState(false);
@@ -279,10 +280,34 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
   // Handle Load button click in Upload Marks
   const handleLoadUploadFilters = () => {
     setUploadFiltersApplied(true);
-    setUploadLoadingMessage(`✓ Loaded: ${course} · Sem ${semester} · ${subject} · ${examType} · Class ${classSection}`);
+    setUploadLoadingMessage(`✓ Loaded: ${course} · ${semester} · ${subject} · ${examType} · Class ${classSection}`);
     console.log(`Upload Data Loaded: Course=${course}, Semester=${semester}, Subject=${subject}, ExamType=${examType}, Class=${classSection}`);
-    
-    // Reset message after 3 seconds
+
+    // Actually fetch from the backend with current filters
+    const filters = { course, semester, exam_type: examType };
+    if (classSection !== "All") filters.section = classSection;
+
+    facultyAPI.getMarks(filters)
+      .then(rows => {
+        const studentMap = {};
+        (rows || []).forEach(r => {
+          const sid = r.student_id;
+          if (!studentMap[sid]) {
+            studentMap[sid] = { id: sid, name: r.name, enroll: r.enroll, rollNo: r.enroll };
+          }
+          const key = normaliseSubjectKey(r.subject || '');
+          studentMap[sid][key] = r.marks ?? 0;
+          studentMap[sid][`${key}_mark_id`] = r.mark_id;
+          studentMap[sid][`${key}_subject_id`] = r.subject_id;
+          if ((r.subject || '').toLowerCase().includes(subject.toLowerCase())) {
+            studentMap[sid].marks = r.marks ?? 0;
+          }
+        });
+        setAllMarksData(Object.values(studentMap));
+      })
+      .catch(err => console.error('Failed to load marks:', err));
+
+    // Reset success message after 3 seconds
     setTimeout(() => setUploadLoadingMessage(""), 3000);
   };
 
@@ -300,65 +325,144 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
     subjectsAssigned: ["Database Management Systems", "Operating Systems", "Data Structures", "Advanced Algorithms"],
   };
 
-  const [allMarksData, setAllMarksData] = useState([
-    { id: 1, rollNo: "22101", name: "Riya",   dbms: 78, os: 82, ds: 75, algo: 88 },
-    { id: 2, rollNo: "22102", name: "Aman",   dbms: 65, os: 70, ds: 60, algo: 75 },
-    { id: 3, rollNo: "22103", name: "Kiran",  dbms: 82, os: 85, ds: 88, algo: 92 },
-    { id: 4, rollNo: "22104", name: "Neha",   dbms: 32, os: 38, ds: 35, algo: 42 },
-    { id: 5, rollNo: "22105", name: "Vikram", dbms: 90, os: 88, ds: 95, algo: 98 },
-    { id: 6, rollNo: "22106", name: "Priya",  dbms: 72, os: 75, ds: 78, algo: 80 },
-    { id: 7, rollNo: "22107", name: "Arjun",  dbms: 55, os: 60, ds: 58, algo: 65 },
-    { id: 8, rollNo: "22108", name: "Divya",  dbms: 88, os: 90, ds: 92, algo: 95 },
-  ]);
+  const [allMarksData, setAllMarksData] = useState([]);
 
   const todayDate = new Date().toISOString().split("T")[0];
   const yesterdayDate = new Date(Date.now() - 1*24*60*60*1000).toISOString().split("T")[0];
   const twoDaysAgoDate = new Date(Date.now() - 2*24*60*60*1000).toISOString().split("T")[0];
 
-  const [queries, setQueries] = useState([
-    { id: 1, student: "Riya",  subject: "DBMS", query: "Marks calculation seems incorrect", status: "Pending",  date: todayDate },
-    { id: 2, student: "Aman",  subject: "OS",   query: "Can I challenge my marks?",          status: "Resolved", date: yesterdayDate },
-    { id: 3, student: "Neha",  subject: "DS",   query: "Request for recheck",                status: "Pending",  date: twoDaysAgoDate },
-  ]);
+  const [queries, setQueries] = useState([]);
 
   /* ── Derived data ───────────────────────────────────────────────────────── */
-  const subKey = subject.toLowerCase() === "algo" ? "algo"
-               : subject.toLowerCase() === "os"   ? "os"
-               : subject.toLowerCase() === "ds"   ? "ds" : "dbms";
 
-  const currentMarks = allMarksData.map(s => ({ ...s, marks: s[subKey] || 0 }));
+  // Load faculty profile and announcements on mount
+  useEffect(() => {
+    facultyAPI.getProfile()
+      .then(profile => {
+        if (profile) {
+          setEditProfileData({
+            name:       profile.name       || "Dr. Rajesh Kumar",
+            email:      profile.email      || "",
+            department: profile.department || "Computer Science",
+            facultyId:  profile.faculty_id || "",
+            phone:      profile.phone      || "",
+          });
+          if (profile.profileImage) setFacultyImage(profile.profileImage);
+        }
+      })
+      .catch(() => {});
+
+    facultyAPI.getQueries()
+      .then(rows => setQueries(rows || []))
+      .catch(() => {});
+
+    facultyAPI.getAnnouncements()
+      .then(rows => setAnnouncements(rows || []))
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // [subjectsState] — dynamic subjects list from DB
+  const [subjectsList, setSubjectsList] = useState([]);
+
+  useEffect(() => {
+    // Load subjects for dropdowns
+    facultyAPI.getSubjects({ course, semester })
+      .then(rows => setSubjectsList(rows || []))
+      .catch(() => {});
+
+    // Fetch marks from backend and pivot: one object per student
+    const markFilters = { course, semester, exam_type: examType };
+    if (classSection !== "All") markFilters.section = classSection;
+
+    facultyAPI.getMarks(markFilters)
+      .then(rows => {
+        const studentMap = {};
+        (rows || []).forEach(r => {
+          const sid = r.student_id;
+          if (!studentMap[sid]) {
+            studentMap[sid] = { id: sid, name: r.name, enroll: r.enroll, rollNo: r.enroll };
+          }
+          // Normalise subject name to a short key: "Database Management Systems" → "dbms" etc.
+          const subjectKey = normaliseSubjectKey(r.subject || '');
+          studentMap[sid][subjectKey] = r.marks ?? 0;
+          studentMap[sid][`${subjectKey}_mark_id`] = r.mark_id;
+          studentMap[sid][`${subjectKey}_subject_id`] = r.subject_id;
+        });
+        setAllMarksData(Object.values(studentMap));
+      })
+      .catch(() => {});
+  }, [course, semester, examType, classSection]);
+
+  // Helper: normalise a subject name/code to a short key
+  function normaliseSubjectKey(name) {
+    const n = name.toLowerCase();
+    if (n.includes('algo'))     return 'algo';
+    if (n.includes('os') || n.includes('operat')) return 'os';
+    if (n.includes('data str') || n === 'ds') return 'ds';
+    if (n.includes('dbms') || n.includes('database')) return 'dbms';
+    if (n.includes('network'))  return 'cn';
+    if (n.includes('artificial') || n.includes('ai')) return 'ai';
+    if (n.includes('java'))     return 'java';
+    if (n.includes('software')) return 'se';
+    if (n.includes('web'))      return 'wt';
+    // Fallback: take first word
+    return n.split(' ')[0].replace(/[^a-z0-9]/g, '');
+  }
+
+  const subKey = normaliseSubjectKey(subject);
+
+  const currentMarks = allMarksData.map(s => ({ ...s, marks: s[subKey] ?? 0 }));
   const weakStudents = currentMarks.filter(s => s.marks < 40);
 
-  const avg = m => (m.reduce((a, b) => a + b, 0) / m.length).toFixed(1);
-  const calcStats = marks => ({
-    avg:        avg(marks),
-    highest:    Math.max(...marks),
-    lowest:     Math.min(...marks),
-    passRate:   ((marks.filter(m => m >= 40).length / marks.length) * 100).toFixed(1),
-    passCount:  marks.filter(m => m >= 40).length,
-    failCount:  marks.filter(m => m < 40).length,
-  });
+  const safeAvg = arr => {
+    const valid = arr.filter(v => v !== undefined && v !== null);
+    if (!valid.length) return "0.0";
+    return (valid.reduce((a, b) => a + b, 0) / valid.length).toFixed(1);
+  };
+  const avg = safeAvg;
+
+  const calcStats = marks => {
+    if (!marks.length) return { avg: "0.0", highest: 0, lowest: 0, passRate: "0.0", passCount: 0, failCount: 0 };
+    return {
+      avg:        safeAvg(marks),
+      highest:    Math.max(...marks),
+      lowest:     Math.min(...marks),
+      passRate:   ((marks.filter(m => m >= 40).length / marks.length) * 100).toFixed(1),
+      passCount:  marks.filter(m => m >= 40).length,
+      failCount:  marks.filter(m => m < 40).length,
+    };
+  };
   const stats = calcStats(currentMarks.map(s => s.marks));
 
-  const subjectAvgs = {
-    dbms: avg(allMarksData.map(s => s.dbms)),
-    os:   avg(allMarksData.map(s => s.os)),
-    ds:   avg(allMarksData.map(s => s.ds)),
-    algo: avg(allMarksData.map(s => s.algo)),
-  };
+  // Build subjectAvgs dynamically from whatever subjects are in the data
+  const uniqueSubjectKeys = [...new Set(
+    allMarksData.flatMap(s => Object.keys(s).filter(k => !['id','name','enroll','rollNo'].includes(k) && !k.includes('_id')))
+  )];
+
+  const subjectAvgs = Object.fromEntries(
+    uniqueSubjectKeys.map(k => [k, safeAvg(allMarksData.map(s => s[k]))])
+  );
+
+  // For chart, prefer the subjectsList from DB; fall back to keys in data
+  const chartSubjects = subjectsList.length
+    ? subjectsList.map(s => ({ label: s.code, key: normaliseSubjectKey(s.name) }))
+    : uniqueSubjectKeys.map(k => ({ label: k.toUpperCase(), key: k }));
 
   const studentResultsData = allMarksData.map(s => {
-    const total = s.dbms + s.os + s.ds + s.algo;
-    return { ...s, totalMarks: total, percentage: ((total / 400) * 100).toFixed(2) };
+    const subjectMarks = chartSubjects.map(cs => s[cs.key] ?? 0);
+    const total = subjectMarks.reduce((a, b) => a + b, 0);
+    const maxTotal = chartSubjects.length * 100 || 100;
+    return { ...s, totalMarks: total, percentage: ((total / maxTotal) * 100).toFixed(2) };
   });
 
   /* ── Chart data ─────────────────────────────────────────────────────────── */
+  const barColors = ["#4f8ef7cc", "#22c55ecc", "#f59e0bcc", "#a855f7cc", "#ec4899cc", "#06b6d4cc"];
   const barData = {
-    labels: ["DBMS", "Operating Systems", "Data Structures", "Algorithms"],
+    labels: chartSubjects.map(cs => cs.label),
     datasets: [{
       label: "Average Marks",
-      data: [subjectAvgs.dbms, subjectAvgs.os, subjectAvgs.ds, subjectAvgs.algo],
-      backgroundColor: ["#4f8ef7cc", "#22c55ecc", "#f59e0bcc", "#a855f7cc"],
+      data: chartSubjects.map(cs => parseFloat(subjectAvgs[cs.key] || 0)),
+      backgroundColor: chartSubjects.map((_, i) => barColors[i % barColors.length]),
       borderRadius: 6, barThickness: 36,
     }],
   };
@@ -385,39 +489,99 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
   };
 
   /* ── Handlers ───────────────────────────────────────────────────────────── */
-  const handleUpdateMarks = (id) => {
-    const val = parseInt(editVal);
-    if (isNaN(val) || val < 0 || val > 100) { alert("Enter valid marks (0-100)"); return; }
-    setAllMarksData(prev => prev.map(s => s.id === id ? { ...s, [subKey]: val } : s));
-    setEditingId(null); setEditVal("");
-  };
+  const handleUpdateMarks = async (studentId) => {
+  const val = parseInt(editVal);
 
-  const handleAddAnnouncement = () => {
-    if (!newAnnouncement.title || !newAnnouncement.message) return;
-    setAnnouncements(prev => [
-      { id: prev.length + 1, ...newAnnouncement, date: new Date().toISOString().split("T")[0], type: "Notice" },
-      ...prev,
-    ]);
-    setNewAnnouncement({ title: "", message: "", course: "MCA", semester: "1", subject: "DBMS", class: "All" });
-    console.log(`Announcement posted - Course: ${newAnnouncement.course}, Sem: ${newAnnouncement.semester}, Subject: ${newAnnouncement.subject}, Class: ${newAnnouncement.class}`);
-  };
+  if (isNaN(val) || val < 0 || val > 100) {
+    alert('Enter valid marks (0-100)');
+    return;
+  }
 
-  const handleReplyQuery = (id) =>
-    setQueries(prev => prev.map(q => q.id === id ? { ...q, status: "Resolved" } : q));
+  // Find the subject_id for the currently selected subject
+  const studentRow = allMarksData.find(s => s.id === studentId);
+  const subjectId = studentRow ? studentRow[`${subKey}_subject_id`] : undefined;
 
-  const handleSaveProfile = () => {
+  if (!subjectId) {
+    alert('Could not determine subject ID. Please re-load data.');
+    return;
+  }
+
+  await facultyAPI.enterMarks({
+    student_id: studentId,
+    subject_id: subjectId,
+    exam_type: examType,
+    marks: val
+  });
+
+  setAllMarksData(prev =>
+    prev.map(s =>
+      s.id === studentId ? { ...s, [subKey]: val } : s
+    )
+  );
+
+  setEditingId(null);
+  setEditVal('');
+};
+
+  const handleAddAnnouncement = async () => {
+  if (!newAnnouncement.title || !newAnnouncement.message) return;
+
+  await facultyAPI.postAnnouncement({
+    ...newAnnouncement,
+    type: 'Notice'
+  });
+
+  const updated = await facultyAPI.getAnnouncements();
+  setAnnouncements(updated);
+
+  setNewAnnouncement({
+    title:'',
+    message:'',
+    course:'MCA',
+    semester:'Sem1',
+    subject:'DBMS',
+    class:'All'
+  });
+};
+
+  const handleReplyQuery = async (id) => {
+  await facultyAPI.resolveQuery(id);
+
+  setQueries(prev =>
+    prev.map(q =>
+      q.id === id ? { ...q, status: 'Resolved' } : q
+    )
+  );
+};
+
+  const handleSaveProfile = async () => {
+    try {
+      await facultyAPI.updateProfile({
+        name:       editProfileData.name,
+        department: editProfileData.department,
+        phone:      editProfileData.phone || '',
+        profileImage: facultyImage || null,
+      });
+    } catch (e) {
+      console.error('Profile update failed', e);
+    }
     setIsEditingProfile(false);
-    console.log("Profile saved:", editProfileData);
   };
 
   const handleCancelEdit = () => {
     setIsEditingProfile(false);
-    setEditProfileData({
-      name: "Dr. Rajesh Kumar",
-      email: "rajesh.kumar@university.edu",
-      department: "Computer Science",
-      facultyId: "FAC-2021-001",
-    });
+    // Re-fetch from backend to restore original values
+    facultyAPI.getProfile().then(profile => {
+      if (profile) {
+        setEditProfileData({
+          name:       profile.name       || '',
+          email:      profile.email      || '',
+          department: profile.department || '',
+          facultyId:  profile.faculty_id || '',
+          phone:      profile.phone      || '',
+        });
+      }
+    }).catch(() => {});
   };
 
   const downloadCSV = () => {
@@ -505,7 +669,7 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
             value={semester} 
             onChange={e => setSemester(e.target.value)}
           >
-            {["1","2","3","4"].map(s => <option key={s} value={s}>Sem {s}</option>)}
+            {["Sem1","Sem2","Sem3","Sem4"].map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
 
@@ -516,10 +680,15 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
             value={subject} 
             onChange={e => setSubject(e.target.value)}
           >
-            <option value="DBMS">DBMS</option>
-            <option value="OS">Operating Systems</option>
-            <option value="DS">Data Structures</option>
-            <option value="ALGO">Algorithms</option>
+            {subjectsList.length > 0
+              ? subjectsList.map(s => <option key={s.id} value={s.name}>{s.name}</option>)
+              : [
+                  <option key="DBMS" value="DBMS">DBMS</option>,
+                  <option key="OS" value="OS">Operating Systems</option>,
+                  <option key="DS" value="DS">Data Structures</option>,
+                  <option key="ALGO" value="ALGO">Algorithms</option>,
+                ]
+            }
           </select>
         </div>
 
@@ -678,9 +847,11 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                {["Roll No","Name","DBMS","OS","DS","Algo","Total","Status"].map(h => (
-                  <th key={h} style={S.th}>{h}</th>
-                ))}
+                <th style={S.th}>Roll No</th>
+                <th style={S.th}>Name</th>
+                {chartSubjects.map(cs => <th key={cs.key} style={S.th}>{cs.label}</th>)}
+                <th style={S.th}>Total</th>
+                <th style={S.th}>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -688,17 +859,15 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
                 const pct = parseFloat(s.percentage);
                 const status = pct >= 75 ? "pass" : pct >= 40 ? "risk" : "fail";
                 const label  = pct >= 75 ? "Good" : pct >= 40 ? "At Risk" : "Fail";
+                const maxTotal = chartSubjects.length * 100 || 400;
                 return (
                   <tr key={s.id} style={{ transition: "background 0.1s" }}
                     onMouseEnter={e => e.currentTarget.style.background = "#ffffff08"}
                     onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                     <td style={S.td}><span style={{ color: T.muted, fontFamily: "monospace", fontSize: 12 }}>{s.rollNo}</span></td>
                     <td style={{ ...S.td, fontWeight: 600 }}>{s.name}</td>
-                    <td style={S.td}>{s.dbms}</td>
-                    <td style={S.td}>{s.os}</td>
-                    <td style={S.td}>{s.ds}</td>
-                    <td style={S.td}>{s.algo}</td>
-                    <td style={{ ...S.td, fontWeight: 600, color: T.accent }}>{s.totalMarks}/400</td>
+                    {chartSubjects.map(cs => <td key={cs.key} style={S.td}>{s[cs.key] ?? 0}</td>)}
+                    <td style={{ ...S.td, fontWeight: 600, color: T.accent }}>{s.totalMarks}/{maxTotal}</td>
                     <td style={S.td}><span style={S.badge(status)}>{label}</span></td>
                   </tr>
                 );
@@ -736,7 +905,7 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
             value={semester} 
             onChange={e => setSemester(e.target.value)}
           >
-            {["1","2","3","4"].map(s => <option key={s} value={s}>Sem {s}</option>)}
+            {["Sem1","Sem2","Sem3","Sem4"].map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
 
@@ -747,10 +916,15 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
             value={subject} 
             onChange={e => setSubject(e.target.value)}
           >
-            <option value="DBMS">DBMS</option>
-            <option value="OS">Operating Systems</option>
-            <option value="DS">Data Structures</option>
-            <option value="ALGO">Algorithms</option>
+            {subjectsList.length > 0
+              ? subjectsList.map(s => <option key={s.id} value={s.name}>{s.name}</option>)
+              : [
+                  <option key="DBMS" value="DBMS">DBMS</option>,
+                  <option key="OS" value="OS">Operating Systems</option>,
+                  <option key="DS" value="DS">Data Structures</option>,
+                  <option key="ALGO" value="ALGO">Algorithms</option>,
+                ]
+            }
           </select>
         </div>
 
@@ -971,10 +1145,10 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
             onChange={e => setResultsSemesterFilter(e.target.value)}
           >
             <option value="All">All Semesters</option>
-            <option value="Sem 1">Sem 1</option>
-            <option value="Sem 2">Sem 2</option>
-            <option value="Sem 3">Sem 3</option>
-            <option value="Sem 4">Sem 4</option>
+            <option value="Sem1">Sem1</option>
+            <option value="Sem2">Sem2</option>
+            <option value="Sem3">Sem3</option>
+            <option value="Sem4">Sem4</option>
           </select>
         </div>
 
@@ -1085,7 +1259,14 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
         
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
-            <tr>{["Roll No","Name","DBMS","OS","DS","Algo","Total","Percentage","Grade"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr>
+            <tr>
+              <th style={S.th}>Roll No</th>
+              <th style={S.th}>Name</th>
+              {chartSubjects.map(cs => <th key={cs.key} style={S.th}>{cs.label}</th>)}
+              <th style={S.th}>Total</th>
+              <th style={S.th}>Percentage</th>
+              <th style={S.th}>Grade</th>
+            </tr>
           </thead>
           <tbody>
             {studentResultsData.sort((a,b) => b.percentage - a.percentage).map(s => {
@@ -1098,10 +1279,7 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
                   onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                   <td style={S.td}><span style={{ color: T.muted, fontFamily: "monospace", fontSize: 12 }}>{s.rollNo}</span></td>
                   <td style={{ ...S.td, fontWeight: 600 }}>{s.name}</td>
-                  <td style={S.td}>{s.dbms}</td>
-                  <td style={S.td}>{s.os}</td>
-                  <td style={S.td}>{s.ds}</td>
-                  <td style={S.td}>{s.algo}</td>
+                  {chartSubjects.map(cs => <td key={cs.key} style={S.td}>{s[cs.key] ?? 0}</td>)}
                   <td style={{ ...S.td, fontWeight: 700 }}>{s.totalMarks}</td>
                   <td style={{ ...S.td, fontWeight: 700, color: pct >= 40 ? T.success : T.danger }}>{pct}%</td>
                   <td style={S.td}><span style={S.badge(status)}>{grade}</span></td>
@@ -1189,10 +1367,10 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
             <label style={S.label}>Semester</label>
             <select style={S.input} value={newAnnouncement.semester}
               onChange={e => setNewAnnouncement({ ...newAnnouncement, semester: e.target.value })}>
-              <option>1</option>
-              <option>2</option>
-              <option>3</option>
-              <option>4</option>
+              <option value="Sem1">Sem1</option>
+              <option value="Sem2">Sem2</option>
+              <option value="Sem3">Sem3</option>
+              <option value="Sem4">Sem4</option>
             </select>
           </div>
           <div>
@@ -1264,16 +1442,16 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               <div style={{ width: 34, height: 34, borderRadius: "50%", background: T.accentSoft, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: T.accent }}>
-                {q.student[0]}
+                {(q.student_name_db || q.student_name || "S")[0]}
               </div>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{q.student}</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{q.student_name_db || q.student_name || "Unknown Student"}</div>
                 <div style={{ fontSize: 11, color: T.muted }}>Subject: {q.subject} · {q.date}</div>
               </div>
             </div>
             <span style={S.badge(q.status === "Pending" ? "pending" : "resolved")}>{q.status}</span>
           </div>
-          <p style={{ fontSize: 13, color: T.textSub, margin: "10px 0", lineHeight: 1.6, paddingLeft: 44 }}>{q.query}</p>
+          <p style={{ fontSize: 13, color: T.textSub, margin: "10px 0", lineHeight: 1.6, paddingLeft: 44 }}>{q.description || q.query}</p>
           {q.status === "Pending" && (
             <div style={{ paddingLeft: 44 }}>
               <button style={S.btnPrimary} onClick={() => handleReplyQuery(q.id)}>Mark as Resolved</button>
