@@ -3,6 +3,7 @@ import { Bar, Line, Doughnut } from "react-chartjs-2";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import Sidebar from "./Sidebar";
+import AIInsight from "./AIInsight";
 import { studentAPI } from "../api";
 
 import {
@@ -43,21 +44,24 @@ function StudentDashboard({ setDashboard, setPage }) {
   const [appliedSem,    setAppliedSem]    = useState("Sem1");
   const [appliedExam,   setAppliedExam]   = useState("CIE1");
 
-  // Concerns
-  const [concerns, setConcerns] = useState([]);
-
-useEffect(() => {
-  studentAPI.getConcerns().then(setConcerns);
-}, []);
+  // Concerns — from backend
+  const [concerns,    setConcerns]    = useState([]);
   const [concernForm, setConcernForm] = useState({ subject:"", examType:"CIE1", description:"", marksObtained:"" });
   const [concernSent, setConcernSent] = useState(false);
 
+  // Summary from backend
   const [summary, setSummary] = useState({ overall_pct: 0, subjects: [] });
 
-  // Notifications
-  const [notifOpen, setNotifOpen] = useState(false);
+  // Notifications — from backend
+  const [announcements, setAnnouncements] = useState([]);
+  const [notifOpen, setNotifOpen]         = useState(false);
   const notifRef = useRef(null);
 
+  // Subjects — from backend
+  const [subjects,       setSubjects]       = useState([]);
+  const [loadedExamType, setLoadedExamType] = useState("CIE1");
+
+  /* ── fetchWithAuth helper (same as doc 9) ──────────────────────────────── */
   const fetchWithAuth = async (path, options = {}) => {
     const token = localStorage.getItem('token');
     const url = path.startsWith('http') ? path : `http://localhost:5000${path}`;
@@ -69,12 +73,10 @@ useEffect(() => {
         ...(options.headers || {}),
       },
     });
-
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || 'Request failed');
     }
-
     return res.json().catch(() => ({}));
   };
 
@@ -98,15 +100,58 @@ useEffect(() => {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  /* ── Notification helpers ──────────────────────────────────────────────── */
-  const [announcements, setAnnouncements] = useState([]);
+  /* ── Load concerns, announcements, summary, profile from backend ──────── */
+  useEffect(() => {
+    studentAPI.getConcerns().then(setConcerns).catch(console.error);
+  }, []);
 
-  const allNotifs = announcements || [];
+  useEffect(() => {
+    studentAPI.getAnnouncements().then(setAnnouncements).catch(console.error);
+  }, []);
 
-useEffect(() => {
-  studentAPI.getAnnouncements().then(setAnnouncements);
-}, []);
+  useEffect(() => {
+    studentAPI.getMarksSummary()
+      .then(setSummary)
+      .catch(console.error);
 
+    studentAPI.getProfile()
+      .then(profile => {
+        const courseValue   = profile.course   || "MCA";
+        const semesterValue = profile.semester || "Sem1";
+        setCourse(courseValue);
+        setPendingCourse(courseValue);
+        setAppliedCourse(courseValue);
+        setSem(semesterValue);
+        setPendingSem(semesterValue);
+        setAppliedSem(semesterValue);
+      })
+      .catch(console.error);
+  }, []);
+
+  /* ── Load subject marks from backend ──────────────────────────────────── */
+  const loadSubjectMarks = async (semesterValue, examValue) => {
+    try {
+      let rows = await studentAPI.getMarks({ semester: semesterValue, exam_type: examValue });
+      let type = examValue;
+      if (!rows.length && examValue !== "FULLRESULT") {
+        rows = await studentAPI.getMarks({ semester: semesterValue, exam_type: "FULLRESULT" });
+        type = "FULLRESULT";
+      }
+      setSubjects(rows.map(r => ({ name: r.subject, marks: r.marks })));
+      setLoadedExamType(type);
+    } catch (error) {
+      console.error(error);
+      setSubjects([]);
+      setLoadedExamType(examValue);
+    }
+  };
+
+  useEffect(() => {
+    loadSubjectMarks(appliedSem, appliedExam);
+  }, [appliedSem, appliedExam]);
+
+  /* ── Notification helpers — backend ───────────────────────────────────── */
+  const allNotifs   = announcements || [];
   const unreadCount = allNotifs.filter(a => !a.read).length;
 
   const markAllRead = async () => {
@@ -129,27 +174,21 @@ useEffect(() => {
     }
   };
 
-  /* ── Concern submit ────────────────────────────────────────────────────── */
+  /* ── Concern submit — backend ──────────────────────────────────────────── */
   const submitConcern = async () => {
-  if (!concernForm.subject.trim() || !concernForm.description.trim()) return;
-
-  try {
-    await studentAPI.postConcern(concernForm);
-
-    setConcernSent(true);
-    setTimeout(() => setConcernSent(false), 3500);
-
-    setConcernForm({
-      subject: '',
-      examType: 'CIE1',
-      description: '',
-      marksObtained: ''
-    });
-
-  } catch (err) {
-    alert(err.message);
-  }
-};
+    if (!concernForm.subject.trim() || !concernForm.description.trim()) return;
+    try {
+      await studentAPI.postConcern(concernForm);
+      // Refresh concerns list from backend
+      const updated = await studentAPI.getConcerns();
+      setConcerns(updated);
+      setConcernForm({ subject:"", examType:"CIE1", description:"", marksObtained:"" });
+      setConcernSent(true);
+      setTimeout(() => setConcernSent(false), 3500);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
 
   /* ── Filters ───────────────────────────────────────────────────────────── */
   const applyFilters = () => {
@@ -161,55 +200,12 @@ useEffect(() => {
     setExam(pendingExam);
   };
 
-  /* ── Subject data ──────────────────────────────────────────────────────── */
-  const [subjects, setSubjects] = useState([]);
-  const [loadedExamType, setLoadedExamType] = useState(appliedExam);
-
-  useEffect(() => {
-    studentAPI.getMarksSummary()
-      .then(setSummary)
-      .catch(console.error);
-
-    studentAPI.getProfile()
-      .then(profile => {
-        const courseValue = profile.course || "MCA";
-        const semesterValue = profile.semester || "Sem1";
-        setCourse(courseValue);
-        setPendingCourse(courseValue);
-        setAppliedCourse(courseValue);
-        setSem(semesterValue);
-        setPendingSem(semesterValue);
-        setAppliedSem(semesterValue);
-      })
-      .catch(console.error);
-  }, []);
-
-  const loadSubjectMarks = async (semesterValue, examValue) => {
-    try {
-      let rows = await studentAPI.getMarks({ semester: semesterValue, exam_type: examValue });
-      let type = examValue;
-      if (!rows.length && examValue !== "FULLRESULT") {
-        rows = await studentAPI.getMarks({ semester: semesterValue, exam_type: "FULLRESULT" });
-        type = "FULLRESULT";
-      }
-      setSubjects(rows.map(r => ({ name: r.subject, marks: r.marks })));
-      setLoadedExamType(type);
-    } catch (error) {
-      console.error(error);
-      setSubjects([]);
-      setLoadedExamType(examValue);
-    }
-  };
-
-  useEffect(() => {
-    loadSubjectMarks(appliedSem, appliedExam);
-  }, [appliedSem, appliedExam]);
-
+  /* ── Derived stats from backend subjects ──────────────────────────────── */
   const semesterAverages = summary.subjects.reduce((acc, subject) => {
     const sem = subject.semester;
     if (!sem) return acc;
     if (!acc[sem]) acc[sem] = { sum: 0, count: 0 };
-    acc[sem].sum += subject.avg_pct || 0;
+    acc[sem].sum   += subject.avg_pct || 0;
     acc[sem].count += 1;
     return acc;
   }, {});
@@ -223,6 +219,7 @@ useEffect(() => {
   const passCount    = subjects.filter(s => s.marks >= 40).length;
   const failCount    = subjects.length ? subjects.length - passCount : 0;
   const cgpaTrend    = semesterMarks.map(s => s.cgpa);
+  const loadedExamLabel = loadedExamType === "FULLRESULT" ? "Final Result" : loadedExamType;
 
   /* ── Charts ────────────────────────────────────────────────────────────── */
   const gridColor   = dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.07)";
@@ -244,14 +241,31 @@ useEffect(() => {
   const barColors = ["#3b82f6","#22c55e","#f59e0b","#a855f7","#06b6d4"];
   const barData   = { labels:subjects.map(s=>s.name), datasets:[{ label:"Marks", data:subjects.map(s=>s.marks), backgroundColor:subjects.map((_,i)=>barColors[i%barColors.length]), borderRadius:6, borderSkipped:false }] };
   const lineData  = { labels:semesterMarks.map(s=>s.sem), datasets:[{ label:"CGPA", data:semesterMarks.map(s=>s.cgpa), borderColor:"#f59e0b", backgroundColor:"rgba(245,158,11,0.1)", tension:0.4, pointBackgroundColor:"#f59e0b", pointRadius:5, fill:true }] };
-  const loadedExamLabel = loadedExamType === "FULLRESULT" ? "Final Result" : loadedExamType;
   const donutData = { labels:["Passed","Failed"], datasets:[{ data:[passCount,failCount], backgroundColor:["#22c55e","#ef4444"], borderWidth:0, hoverOffset:4 }] };
   const donutOptions = { responsive:true, cutout:"70%", plugins:{ legend:{ position:"bottom", labels:{ color:legendColor, padding:16, font:{size:12} } }, tooltip:{ backgroundColor:dark?"#1e293b":"#fff", titleColor:dark?"#e2e8f0":"#1e293b", bodyColor:dark?"#94a3b8":"#475569", borderColor:dark?"#334155":"#e2e8f0", borderWidth:1 } } };
 
   /* ── AI messages ───────────────────────────────────────────────────────── */
   const aiMessage       = avgMarks>=80?"Excellent performance! You are performing at a top academic level.":avgMarks>=60?"Good performance overall, but there is room for improvement.":"Your performance is below average. Focus on improving weak subjects.";
-  const progressMessage = cgpaTrend[cgpaTrend.length-1]>cgpaTrend[0]?"Your CGPA trend shows improvement across semesters.":cgpaTrend[cgpaTrend.length-1]===cgpaTrend[0]?"Your CGPA trend is stable.":"Your CGPA trend is declining. Focus on academics.";
-  const studyPlan       = weakSubjects.length>0?`Spend more time studying ${weakSubjects.map(s=>s.name).join(", ")}. Practice previous year questions.`:"No weak subjects detected. Maintain your consistency.";
+  const progressMessage = cgpaTrend.length > 1
+    ? cgpaTrend[cgpaTrend.length-1] > cgpaTrend[0]
+      ? "Your CGPA trend shows improvement across semesters."
+      : cgpaTrend[cgpaTrend.length-1] === cgpaTrend[0]
+        ? "Your CGPA trend is stable."
+        : "Your CGPA trend is declining. Focus on academics."
+    : "Not enough semester data to show trend yet.";
+  const studyPlan = weakSubjects.length > 0
+    ? `Spend more time studying ${weakSubjects.map(s=>s.name).join(", ")}. Practice previous year questions.`
+    : "No weak subjects detected. Maintain your consistency.";
+
+  /* ── AI data context — built from real backend data ───────────────────── */
+  const aiDataContext = [
+    `Student: ${appliedCourse} · ${appliedSem} · ${loadedExamLabel}`,
+    `Subjects: ${subjects.map(s => s.name+'='+s.marks+'%').join(', ') || 'No data loaded'}`,
+    `Avg marks: ${avgMarks.toFixed(1)} | Pass: ${passCount} | Fail: ${failCount}`,
+    `Weak subjects (below 40): ${weakSubjects.length > 0 ? weakSubjects.map(s=>s.name).join(', ') : 'None'}`,
+    `Semester trend: ${semesterMarks.map(s=>s.sem+'='+s.cgpa).join(', ') || 'No trend data'}`,
+    `Overall %: ${summary.overall_pct || 0}`,
+  ].join('\n');
 
   /* ── Downloads ─────────────────────────────────────────────────────────── */
   const downloadResult = async () => {
@@ -382,7 +396,6 @@ useEffect(() => {
                   borderRadius:14, boxShadow:"0 24px 56px rgba(0,0,0,0.4)",
                   overflow:"hidden", display:"flex", flexDirection:"column",
                 }}>
-                  {/* Header */}
                   <div style={{ padding:"14px 18px 12px", borderBottom:`1px solid ${t.border}`, display:"flex", justifyContent:"space-between", alignItems:"center", background:t.surface }}>
                     <div>
                       <div style={{ fontSize:14, fontWeight:700, color:t.text }}>🔔 Notifications</div>
@@ -398,7 +411,6 @@ useEffect(() => {
                     )}
                   </div>
 
-                  {/* List */}
                   <div style={{ overflowY:"auto", flex:1 }}>
                     {allNotifs.length === 0 ? (
                       <div style={{ padding:"48px 20px", textAlign:"center", color:t.textSub }}>
@@ -419,7 +431,6 @@ useEffect(() => {
                           onMouseEnter={e => e.currentTarget.style.background=dark?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.02)"}
                           onMouseLeave={e => e.currentTarget.style.background=isUnread?(dark?"rgba(59,130,246,0.07)":"rgba(59,130,246,0.04)"):"transparent"}
                         >
-                          {/* Unread dot */}
                           <div style={{ marginTop:5, flexShrink:0, width:8, height:8, borderRadius:"50%", background:isUnread?"#3b82f6":"transparent", border:isUnread?"none":`1px solid ${t.border}` }} />
                           <div style={{ flex:1, minWidth:0 }}>
                             <div style={{ fontSize:13, fontWeight:isUnread?600:400, color:t.text, marginBottom:3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
@@ -440,7 +451,6 @@ useEffect(() => {
                     })}
                   </div>
 
-                  {/* Footer */}
                   <div style={{ padding:"10px 18px", borderTop:`1px solid ${t.border}`, textAlign:"center" }}>
                     <button onClick={() => { setNotifOpen(false); setView("announcements"); }}
                       style={{ fontSize:12, fontWeight:600, color:"#3b82f6", background:"none", border:"none", cursor:"pointer" }}>
@@ -478,10 +488,10 @@ useEffect(() => {
 
               <div style={s.statsRow}>
                 {[
-                  { label:"Average %", value:`${subjects.length ? avgMarks.toFixed(1) : 0}%`, sub:`${appliedCourse} · ${appliedSem} · ${loadedExamLabel}`, accent:"#3b82f6", badge:"Based on selected exam", bc:"#22c55e" },
-                  { label:"Subjects", value:subjects.length || 0, sub:"Current exam records", accent:"#f59e0b", badge:`${passCount} passed`, bc:"#22c55e" },
-                  { label:"Pass Rate", value:`${subjects.length ? Math.round((passCount/subjects.length)*100) : 0}%`, sub:"For selected exam", accent:"#22c55e", badge:`${failCount} fail`, bc:"#22c55e" },
-                  { label:"Weak Subjects", value:weakSubjects.length || 0, sub:"Needs attention", accent:"#a855f7", badge:"Review these subjects", bc:"#f59e0b" },
+                  { label:"Average %",     value:`${subjects.length ? avgMarks.toFixed(1) : 0}%`, sub:`${appliedCourse} · ${appliedSem} · ${loadedExamLabel}`, accent:"#3b82f6", badge:"Based on selected exam", bc:"#22c55e" },
+                  { label:"Subjects",      value:subjects.length || 0,                             sub:"Current exam records",   accent:"#f59e0b", badge:`${passCount} passed`, bc:"#22c55e" },
+                  { label:"Pass Rate",     value:`${subjects.length ? Math.round((passCount/subjects.length)*100) : 0}%`, sub:"For selected exam", accent:"#22c55e", badge:`${failCount} fail`, bc:"#22c55e" },
+                  { label:"Weak Subjects", value:weakSubjects.length || 0,                         sub:"Needs attention",        accent:"#a855f7", badge:"Review these", bc:"#f59e0b" },
                 ].map((c,i)=>(
                   <div key={i} style={s.card(c.accent)}>
                     <div style={s.cardLabel}>{c.label}</div>
@@ -498,12 +508,18 @@ useEffect(() => {
                 <div style={s.chartBox}>
                   <div style={s.sectionTitle}>Subject-wise Marks</div>
                   <div style={s.sectionSub}>All subjects this semester</div>
-                  <Bar data={barData} options={chartDefaults} />
+                  {subjects.length > 0
+                    ? <Bar data={barData} options={chartDefaults} />
+                    : <div style={{ textAlign:"center", padding:"40px 0", color:t.textSub, fontSize:13 }}>No marks data loaded yet.</div>
+                  }
                 </div>
                 <div style={s.chartBox}>
                   <div style={s.sectionTitle}>Pass / Fail Distribution</div>
                   <div style={s.sectionSub}>{loadedExamLabel}</div>
-                  <Doughnut data={donutData} options={donutOptions} />
+                  {subjects.length > 0
+                    ? <Doughnut data={donutData} options={donutOptions} />
+                    : <div style={{ textAlign:"center", padding:"40px 0", color:t.textSub, fontSize:13 }}>No data.</div>
+                  }
                   <div style={{ marginTop:16, display:"flex", justifyContent:"space-between", fontSize:12 }}>
                     <span style={{color:"#22c55e"}}>● Passed <strong>{passCount} ({subjects.length ? Math.round(passCount/subjects.length*100) : 0}%)</strong></span>
                     <span style={{color:"#ef4444"}}>● Failed <strong>{failCount} ({subjects.length ? Math.round(failCount/subjects.length*100) : 0}%)</strong></span>
@@ -515,7 +531,10 @@ useEffect(() => {
                 <div style={s.chartBox}>
                   <div style={s.sectionTitle}>CGPA Progress</div>
                   <div style={s.sectionSub}>Semester-wise trend</div>
-                  <Line data={lineData} options={chartDefaults} />
+                  {semesterMarks.length > 0
+                    ? <Line data={lineData} options={chartDefaults} />
+                    : <div style={{ textAlign:"center", padding:"40px 0", color:t.textSub, fontSize:13 }}>No semester data available.</div>
+                  }
                 </div>
                 <div style={s.chartBox}>
                   <div style={s.sectionTitle}>Quick Analysis</div>
@@ -532,6 +551,7 @@ useEffect(() => {
                   ))}
                 </div>
               </div>
+              <AIInsight role="student" dataContext={aiDataContext} dark={dark} />
             </>
           )}
 
@@ -549,47 +569,53 @@ useEffect(() => {
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
                   <div>
                     <div style={s.sectionTitle}>Results</div>
-                    <div style={s.sectionSub}>{appliedCourse} · {appliedSem} · {appliedExam}</div>
+                    <div style={s.sectionSub}>{appliedCourse} · {appliedSem} · {loadedExamLabel}</div>
                   </div>
                   <div style={{ display:"flex", gap:8 }}>
                     <button style={s.dlBtnAlt} onClick={downloadCSV}>Export CSV</button>
                     <button style={s.dlBtn}    onClick={downloadResult}>Export PDF</button>
                   </div>
                 </div>
-                <table style={s.table}>
-                  <thead>
-                    <tr>
-                      {["#","Subject","Marks","Max","Status","Action"].map(h=><th key={h} style={s.th}>{h}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {subjects.map((sub,i)=>(
-                      <tr key={i}
-                        onMouseEnter={e=>e.currentTarget.style.background=dark?"rgba(255,255,255,0.03)":"rgba(0,0,0,0.02)"}
-                        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                        <td style={s.td}>{i+1}</td>
-                        <td style={s.td}>{sub.name}</td>
-                        <td style={{ ...s.td, fontWeight:600 }}>{sub.marks}</td>
-                        <td style={{ ...s.td, color:t.textSub }}>100</td>
-                        <td style={s.td}>
-                          <span style={{ padding:"3px 12px", borderRadius:20, fontSize:11, fontWeight:600, background:sub.marks<40?"rgba(239,68,68,0.12)":"rgba(34,197,94,0.12)", color:sub.marks<40?"#ef4444":"#22c55e", border:`1px solid ${sub.marks<40?"rgba(239,68,68,0.25)":"rgba(34,197,94,0.25)"}` }}>
-                            {sub.marks<40?"Fail":"Pass"}
-                          </span>
-                        </td>
-                        <td style={s.td}>
-                          <button
-                            onClick={() => {
-                              setConcernForm(f=>({ ...f, subject:sub.name, examType:appliedExam, marksObtained:String(sub.marks) }));
-                              setView("concerns");
-                            }}
-                            style={{ fontSize:11, fontWeight:600, color:"#f59e0b", background:"rgba(245,158,11,0.08)", border:"1px solid rgba(245,158,11,0.25)", borderRadius:6, padding:"5px 12px", cursor:"pointer", whiteSpace:"nowrap" }}>
-                            ⚠ Raise Concern
-                          </button>
-                        </td>
+                {subjects.length === 0 ? (
+                  <div style={{ textAlign:"center", padding:"40px 0", color:t.textSub, fontSize:13 }}>
+                    No results found for {appliedSem} · {appliedExam}. Try a different filter.
+                  </div>
+                ) : (
+                  <table style={s.table}>
+                    <thead>
+                      <tr>
+                        {["#","Subject","Marks","Max","Status","Action"].map(h=><th key={h} style={s.th}>{h}</th>)}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {subjects.map((sub,i)=>(
+                        <tr key={i}
+                          onMouseEnter={e=>e.currentTarget.style.background=dark?"rgba(255,255,255,0.03)":"rgba(0,0,0,0.02)"}
+                          onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                          <td style={s.td}>{i+1}</td>
+                          <td style={s.td}>{sub.name}</td>
+                          <td style={{ ...s.td, fontWeight:600 }}>{sub.marks}</td>
+                          <td style={{ ...s.td, color:t.textSub }}>100</td>
+                          <td style={s.td}>
+                            <span style={{ padding:"3px 12px", borderRadius:20, fontSize:11, fontWeight:600, background:sub.marks<40?"rgba(239,68,68,0.12)":"rgba(34,197,94,0.12)", color:sub.marks<40?"#ef4444":"#22c55e", border:`1px solid ${sub.marks<40?"rgba(239,68,68,0.25)":"rgba(34,197,94,0.25)"}` }}>
+                              {sub.marks<40?"Fail":"Pass"}
+                            </span>
+                          </td>
+                          <td style={s.td}>
+                            <button
+                              onClick={() => {
+                                setConcernForm(f=>({ ...f, subject:sub.name, examType:appliedExam, marksObtained:String(sub.marks) }));
+                                setView("concerns");
+                              }}
+                              style={{ fontSize:11, fontWeight:600, color:"#f59e0b", background:"rgba(245,158,11,0.08)", border:"1px solid rgba(245,158,11,0.25)", borderRadius:6, padding:"5px 12px", cursor:"pointer", whiteSpace:"nowrap" }}>
+                              ⚠ Raise Concern
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
                 <div style={{ marginTop:16, paddingTop:16, borderTop:`1px solid ${t.border}`, display:"flex", gap:24, fontSize:13 }}>
                   <span style={{color:t.textSub}}>Total: <strong style={{color:t.text}}>{subjects.length}</strong></span>
                   <span style={{color:"#22c55e"}}>Passed: <strong>{passCount}</strong></span>
@@ -603,10 +629,7 @@ useEffect(() => {
           {/* ═══ RAISE A CONCERN ════════════════════════════════════════ */}
           {view === "concerns" && (
             <div>
-              {/* Form card */}
               <div style={{ ...s.chartBox, marginBottom:20 }}>
-
-                {/* Header */}
                 <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:22 }}>
                   <div style={{ width:44, height:44, borderRadius:12, background:"rgba(245,158,11,0.12)", border:"1px solid rgba(245,158,11,0.2)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>⚠️</div>
                   <div>
@@ -615,7 +638,6 @@ useEffect(() => {
                   </div>
                 </div>
 
-                {/* Success banner */}
                 {concernSent && (
                   <div style={{ marginBottom:20, padding:"13px 18px", background:"rgba(34,197,94,0.1)", border:"1px solid rgba(34,197,94,0.3)", borderRadius:10, display:"flex", alignItems:"center", gap:10, fontSize:13, color:"#22c55e", fontWeight:600 }}>
                     <span style={{ fontSize:20 }}>✓</span>
@@ -623,7 +645,6 @@ useEffect(() => {
                   </div>
                 )}
 
-                {/* Fields row */}
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14, marginBottom:16 }}>
                   <div>
                     <label style={s.label}>Subject *</label>
@@ -649,7 +670,7 @@ useEffect(() => {
                 <div style={{ marginBottom:20 }}>
                   <label style={s.label}>Description *</label>
                   <textarea style={s.textarea}
-                    placeholder="Describe your concern clearly. e.g. 'I believe my answer for Q3 was correct but marked wrong. Expected marks should be around 50.'"
+                    placeholder="Describe your concern clearly."
                     value={concernForm.description}
                     onChange={e=>setConcernForm(f=>({...f, description:e.target.value}))} />
                 </div>
@@ -667,7 +688,6 @@ useEffect(() => {
                 </div>
               </div>
 
-              {/* My concerns history */}
               <div style={s.chartBox}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
                   <div>
@@ -734,6 +754,7 @@ useEffect(() => {
                   <div style={{ ...s.aiText, fontSize:14 }}>{item.text}</div>
                 </div>
               ))}
+              <AIInsight role="student" dataContext={aiDataContext} dark={dark} />
             </div>
           )}
 
@@ -791,14 +812,17 @@ useEffect(() => {
                 <div style={s.sectionSub}>Semester-wise CGPA trend</div>
               </div>
               <div style={{ ...s.chartBox, marginBottom:16 }}>
-                <Line data={lineData} options={chartDefaults} />
+                {semesterMarks.length > 0
+                  ? <Line data={lineData} options={chartDefaults} />
+                  : <div style={{ textAlign:"center", padding:"40px 0", color:t.textSub, fontSize:13 }}>No semester data available yet.</div>
+                }
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:12 }}>
                 {semesterMarks.map((sm,i)=>(
                   <div key={i} style={s.card("#3b82f6")}>
                     <div style={s.cardLabel}>{sm.sem}</div>
                     <div style={s.cardValue}>{sm.cgpa}</div>
-                    <div style={s.cardSub}>CGPA</div>
+                    <div style={s.cardSub}>Avg %</div>
                   </div>
                 ))}
               </div>
@@ -817,7 +841,7 @@ useEffect(() => {
               <div style={s.chartBox}>
                 <div style={{ marginBottom:20 }}>
                   <div style={s.sectionTitle}>Download Results</div>
-                  <div style={s.sectionSub}>{appliedCourse} · {appliedSem} · {appliedExam} — {subjects.length} subjects</div>
+                  <div style={s.sectionSub}>{appliedCourse} · {appliedSem} · {loadedExamLabel} — {subjects.length} subjects</div>
                 </div>
                 <div style={{ display:"flex", gap:12 }}>
                   <button style={s.dlBtnAlt} onClick={downloadCSV}>⬇ Download CSV</button>

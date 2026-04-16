@@ -69,6 +69,7 @@ const [newAnnouncement, setNewAnnouncement] = useState({
   subject: "DBMS",
   class: "All",
 });
+const [announcementFile, setAnnouncementFile] = useState(null);
 const [announcements,setAnnouncements] = useState([]);
 
 /* FETCH DATA */
@@ -189,6 +190,7 @@ const postAnnouncement = () => {
         subject: "DBMS",
         class: "All",
       });
+      setAnnouncementFile(null);
     })
     .catch(err => console.log(err));
 };
@@ -332,6 +334,38 @@ return(
             value={newAnnouncement.message}
             onChange={(e) => setNewAnnouncement({ ...newAnnouncement, message: e.target.value })}
           />
+        </div>
+
+        <div className="admin-announcement-row">
+          <label>Attachment (Optional)</label>
+          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            <input
+              type="file"
+              id="adminAnnouncementFileInput"
+              style={{ display: "none" }}
+              onChange={(e) => setAnnouncementFile(e.target.files?.[0] || null)}
+            />
+            <button
+              type="button"
+              className="admin-announcement-file-btn"
+              onClick={() => document.getElementById('adminAnnouncementFileInput').click()}
+            >
+              📎 Add File
+            </button>
+            {announcementFile && (
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", backgroundColor: "rgba(79, 142, 247, 0.15)", borderRadius: "8px", flex: 1 }}>
+                <span style={{ fontSize: "12px" }}>📄</span>
+                <span style={{ fontSize: "12px", color: "#e2e8f0" }}>{announcementFile.name}</span>
+                <button
+                  type="button"
+                  style={{ marginLeft: "auto", background: "transparent", border: "none", color: "#4f8ef7", cursor: "pointer", fontSize: "14px" }}
+                  onClick={() => setAnnouncementFile(null)}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         <button className="admin-announcement-submit" onClick={postAnnouncement}>
