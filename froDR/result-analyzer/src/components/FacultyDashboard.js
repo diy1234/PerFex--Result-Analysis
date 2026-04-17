@@ -109,6 +109,7 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
   const [course,      setCourse]      = useState("MCA");
   const [semester,    setSemester]    = useState("Sem1");
   const [subject,     setSubject]     = useState("DBMS");
+  const [selectedSubjectId, setSelectedSubjectId] = useState(null);
   const [examType,    setExamType]    = useState("CIE1");
   const [editingId,   setEditingId]   = useState(null);
   const [editVal,     setEditVal]     = useState("");
@@ -129,6 +130,9 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
     name:"Dr. Rajesh Kumar", email:"rajesh.kumar@university.edu",
     department:"Computer Science", facultyId:"FAC-2021-001",
   });
+
+  // ── NEW: State for faculty allocations ──
+  const [facultyAllocations, setFacultyAllocations] = useState([]);
 
   const T = isDarkMode ? DARK_T : LIGHT_T;
   const S = getStyles(T);
@@ -153,7 +157,7 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
     return n.split(' ')[0].replace(/[^a-z0-9]/g, '');
   }
 
-  /* ── Load profile, queries, announcements on mount ───────────────────── */
+  /* ── Load profile, allocations, queries, announcements on mount ───────── */
   useEffect(() => {
     facultyAPI.getProfile()
       .then(profile => {
@@ -170,6 +174,21 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
       })
       .catch(() => {});
 
+    // Load faculty allocations
+    facultyAPI.getAllocations()
+      .then(allocations => {
+        setFacultyAllocations(allocations || []);
+        // Set initial course/semester from first allocation
+        if (allocations && allocations.length > 0) {
+          setCourse(allocations[0].course);
+          setSemester(allocations[0].semester);
+          setSubject(allocations[0].subject_name);
+          setSelectedSubjectId(allocations[0].subject_id);
+          if (allocations[0].section) setClassSection(allocations[0].section);
+        }
+      })
+      .catch(() => {});
+
     facultyAPI.getQueries()
       .then(rows => setQueries(rows || []))
       .catch(() => {});
@@ -179,6 +198,21 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
       .catch(() => {}); // eslint-disable-line react-hooks/exhaustive-deps
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Derived: Available options from allocations ─────────────────────────
+  const availableCourses = [...new Set(facultyAllocations.map(a => a.course))].sort();
+  const availableSemesters = [...new Set(
+    facultyAllocations.filter(a => a.course === course).map(a => a.semester)
+  )].sort();
+  const availableSubjects = [...new Set(
+    facultyAllocations.filter(a => a.course === course && a.semester === semester)
+      .map(a => a.subject_name)
+  )].sort();
+  const availableSections = [...new Set(
+    facultyAllocations.filter(a => a.course === course && a.semester === semester)
+      .map(a => a.section).filter(s => s)
+  )].sort();
+  availableSections.unshift("All"); // Add "All" option
+
   /* ── Load subjects list + marks from backend when filters change ──────── */
   useEffect(() => {
     facultyAPI.getSubjects({ course, semester })
@@ -186,6 +220,7 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
       .catch(() => {});
 
     const markFilters = { course, semester, exam_type: examType };
+    if (selectedSubjectId) markFilters.subject_id = selectedSubjectId;
     if (classSection !== "All") markFilters.section = classSection;
 
     facultyAPI.getMarks(markFilters)
@@ -204,11 +239,36 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
         setAllMarksData(Object.values(studentMap));
       })
       .catch(() => {});
-  }, [course, semester, examType, classSection]);
+  }, [course, semester, subject, selectedSubjectId, examType, classSection]);
 
   /* ── Derived data ────────────────────────────────────────────────────── */
-  const subKey = normaliseSubjectKey(subject);
-  const currentMarks = allMarksData.map(s => ({ ...s, marks: s[subKey] ?? 0 }));
+  const selectedSubjectKey = selectedSubjectId ? normaliseSubjectKey(subject) : null;
+
+  const uniqueSubjectKeys = [...new Set(
+    allMarksData.flatMap(s =>
+      Object.keys(s).filter(k => !['id','name','enroll','rollNo'].includes(k) && !k.includes('_id'))
+    )
+  )];
+
+  const chartSubjects = subjectsList.length
+    ? subjectsList.map(s => ({ label:s.code, key:normaliseSubjectKey(s.name) }))
+    : uniqueSubjectKeys.length
+      ? uniqueSubjectKeys.map(k => ({ label:k.toUpperCase(), key:k }))
+      : [
+          { label:"DBMS", key:"dbms" }, { label:"OS",   key:"os"   },
+          { label:"DS",   key:"ds"   }, { label:"Algo", key:"algo" },
+        ];
+
+  const currentMarks = allMarksData.map(s => {
+    if (selectedSubjectKey) {
+      return { ...s, marks: s[selectedSubjectKey] ?? 0 };
+    }
+    const subjectMarks = chartSubjects.map(cs => s[cs.key] ?? 0);
+    const total = subjectMarks.reduce((a,b) => a + b, 0);
+    const maxTotal = (chartSubjects.length || 1) * 100;
+    const pct = maxTotal ? (total / maxTotal) * 100 : 0;
+    return { ...s, marks: Number(pct.toFixed(1)), totalMarks: total, percentage: pct.toFixed(2) };
+  });
   const weakStudents  = currentMarks.filter(s => s.marks < 40);
 
   const safeAvg = arr => {
@@ -230,24 +290,9 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
   };
   const stats = calcStats(currentMarks.map(s => s.marks));
 
-  const uniqueSubjectKeys = [...new Set(
-    allMarksData.flatMap(s =>
-      Object.keys(s).filter(k => !['id','name','enroll','rollNo'].includes(k) && !k.includes('_id'))
-    )
-  )];
-
   const subjectAvgs = Object.fromEntries(
     uniqueSubjectKeys.map(k => [k, safeAvg(allMarksData.map(s => s[k]))])
   );
-
-  const chartSubjects = subjectsList.length
-    ? subjectsList.map(s => ({ label:s.code, key:normaliseSubjectKey(s.name) }))
-    : uniqueSubjectKeys.length
-      ? uniqueSubjectKeys.map(k => ({ label:k.toUpperCase(), key:k }))
-      : [
-          { label:"DBMS", key:"dbms" }, { label:"OS",   key:"os"   },
-          { label:"DS",   key:"ds"   }, { label:"Algo", key:"algo" },
-        ];
 
   const studentResultsData = allMarksData.map(s => {
     const subjectMarks = chartSubjects.map(cs => s[cs.key] ?? 0);
@@ -263,7 +308,7 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
     `Pass: ${stats.passCount} students | Fail: ${stats.failCount} students`,
     `At-risk (below 40): ${weakStudents.map(s => s.name+'('+s.marks+')').join(', ') || 'None'}`,
     `Subject averages — ${uniqueSubjectKeys.map(k => k.toUpperCase()+':'+subjectAvgs[k]).join(' ') || 'No data'}`,
-    `All students: ${allMarksData.map(s => s.name+'='+s[subKey]).join(', ') || 'No data'}`,
+    `All students: ${allMarksData.map(s => s.name+'='+ (selectedSubjectKey ? s[selectedSubjectKey] : s.percentage)).join(', ') || 'No data'}`,
   ].join('\n');
 
   /* ── Chart data ──────────────────────────────────────────────────────── */
@@ -295,6 +340,7 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
     setUploadLoadingMessage(`✓ Loaded: ${course} · ${semester} · ${subject} · ${examType} · Class ${classSection}`);
 
     const filters = { course, semester, exam_type: examType };
+    if (selectedSubjectId) filters.subject_id = selectedSubjectId;
     if (classSection !== "All") filters.section = classSection;
 
     facultyAPI.getMarks(filters)
@@ -327,12 +373,12 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
     if (isNaN(val) || val < 0 || val > 100) { alert("Enter valid marks (0-100)"); return; }
 
     const studentRow = allMarksData.find(s => s.id === studentId);
-    const subjectId  = studentRow ? studentRow[`${subKey}_subject_id`] : undefined;
+    const subjectId  = studentRow && selectedSubjectKey ? studentRow[`${selectedSubjectKey}_subject_id`] : undefined;
     if (!subjectId) { alert("Could not determine subject ID. Please re-load data."); return; }
 
     await facultyAPI.enterMarks({ student_id:studentId, subject_id:subjectId, exam_type:examType, marks:val });
 
-    setAllMarksData(prev => prev.map(s => s.id === studentId ? { ...s, [subKey]:val } : s));
+    setAllMarksData(prev => prev.map(s => s.id === studentId ? { ...s, [selectedSubjectKey]:val } : s));
     setEditingId(null);
     setEditVal('');
   };
@@ -434,16 +480,24 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
   /* ── Filter bar (shared across views) ───────────────────────────────── */
   const FilterBar = ({ onApply }) => (
     <div style={{ display:"flex", gap:14, marginBottom:28, alignItems:"center", flexWrap:"wrap" }}>
-      <select style={{ ...S.select, minWidth:140, padding:"10px 14px", fontSize:14, fontWeight:500 }} value={course} onChange={e => setCourse(e.target.value)}>
-        <option value="MCA">MCA</option><option value="BCA">BCA</option>
+      <select style={{ ...S.select, minWidth:140, padding:"10px 14px", fontSize:14, fontWeight:500 }} value={course} onChange={e => { setCourse(e.target.value); setSemester(""); setSubject(""); setSelectedSubjectId(null); }}>
+        <option value="">Select Course</option>
+        {availableCourses.map(c => <option key={c} value={c}>{c}</option>)}
       </select>
-      <select style={{ ...S.select, minWidth:140, padding:"10px 14px", fontSize:14, fontWeight:500 }} value={semester} onChange={e => setSemester(e.target.value)}>
-        {["Sem1","Sem2","Sem3","Sem4"].map(s => <option key={s} value={s}>{s}</option>)}
+      <select style={{ ...S.select, minWidth:140, padding:"10px 14px", fontSize:14, fontWeight:500 }} value={semester} onChange={e => { setSemester(e.target.value); setSubject(""); setSelectedSubjectId(null); }}>
+        <option value="">Select Semester</option>
+        {availableSemesters.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
-      <select style={{ ...S.select, minWidth:180, padding:"10px 14px", fontSize:14, fontWeight:500 }} value={subject} onChange={e => setSubject(e.target.value)}>
-        {subjectsList.length > 0
-          ? subjectsList.map(s => <option key={s.id} value={s.name}>{s.name}</option>)
-          : [<option key="DBMS" value="DBMS">DBMS</option>, <option key="OS" value="OS">Operating Systems</option>, <option key="DS" value="DS">Data Structures</option>, <option key="ALGO" value="ALGO">Algorithms</option>]
+      <select style={{ ...S.select, minWidth:180, padding:"10px 14px", fontSize:14, fontWeight:500 }} value={subject} onChange={e => {
+        const value = e.target.value;
+        setSubject(value);
+        const allocation = facultyAllocations.find(a => a.subject_name === value && a.course === course && a.semester === semester);
+        setSelectedSubjectId(allocation ? allocation.subject_id : null);
+      }}>
+        <option value="">Select Subject</option>
+        {availableSubjects.length > 0
+          ? availableSubjects.map(s => <option key={s} value={s}>{s}</option>)
+          : [<option key="DBMS" value="DBMS">DBMS</option>, <option key="OS" value="OS">Operating Systems</option>]
         }
       </select>
       <select style={{ ...S.select, minWidth:160, padding:"10px 14px", fontSize:14, fontWeight:500 }} value={examType} onChange={e => setExamType(e.target.value)}>
@@ -452,8 +506,7 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
         <option value="FULLRESULT">Full Result</option>
       </select>
       <select style={{ ...S.select, minWidth:120, padding:"10px 14px", fontSize:14, fontWeight:500 }} value={classSection} onChange={e => setClassSection(e.target.value)}>
-        <option value="A">Class A</option><option value="B">Class B</option>
-        <option value="C">Class C</option><option value="All">All Classes</option>
+        {availableSections.map(sec => <option key={sec} value={sec}>{sec === "All" ? "All Classes" : `Class ${sec}`}</option>)}
       </select>
       <button onClick={onApply} style={{ ...S.btnPrimary, padding:"10px 32px", fontSize:15, fontWeight:600, minWidth:120, cursor:"pointer", boxShadow:"0 4px 12px rgba(79,142,247,0.3)" }}
         onMouseEnter={e => e.target.style.transform="translateY(-2px)"}
@@ -482,7 +535,7 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
 
       <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:16, marginBottom:24 }}>
         <StatCard label="Total Students"  value={allMarksData.length} sub={`${course} · Sem ${semester}`} color={T.accent}   trend={{ up:true,  label:"+2 this batch" }} />
-        <StatCard label="Class Average"   value={`${stats.avg}%`}     sub="Selected subject"              color={T.warning}  trend={{ up:false, label:"-1.2% vs last" }} />
+        <StatCard label="Class Average"   value={`${stats.avg}%`}     sub={selectedSubjectId ? "Selected subject" : "Overall semester"} color={T.warning}  trend={{ up:false, label:"-1.2% vs last" }} />
         <StatCard label="Pass Rate"       value={`${stats.passRate}%`} sub={`${stats.passCount} of ${allMarksData.length} passed`} color={T.success} trend={{ up:true, label:"+3% improved" }} />
         <StatCard label="At-Risk Students" value={weakStudents.length} sub="Scored below 40"              color={T.danger}   trend={weakStudents.length>0?{ up:false, label:"Needs attention" }:null} />
       </div>

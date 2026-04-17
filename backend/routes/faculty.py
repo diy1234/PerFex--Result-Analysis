@@ -20,6 +20,27 @@ def get_profile():
     })
 
 
+# ── GET /api/faculty/allocations - Returns faculty's subject allocations
+@faculty_bp.route('/allocations', methods=['GET'])
+@token_required
+def get_allocations():
+    """Returns all courses, semesters, subjects, and sections allocated to this faculty"""
+    conn = get_db()
+    allocations = conn.execute("""
+        SELECT DISTINCT 
+            fa.id, fa.faculty_id, 
+            s.id AS subject_id, s.name AS subject_name, s.code AS subject_code,
+            fa.course, fa.semester, fa.section
+        FROM faculty_allocations fa
+        INNER JOIN subjects s ON s.id = fa.subject_id
+        WHERE fa.faculty_id = ?
+        ORDER BY fa.course, fa.semester, s.name, fa.section
+    """, (request.user_id,)).fetchall()
+    conn.close()
+    
+    return jsonify([dict(a) for a in allocations])
+
+
 # ── PUT /api/faculty/profile ─────────────────────────────────────────────────
 @faculty_bp.route('/profile', methods=['PUT'])
 @token_required
@@ -36,39 +57,83 @@ def update_profile():
     return jsonify({'message': 'Profile updated'})
 
 
-# ── GET /api/faculty/students ─────────────────────────────────────────────────
+# ── GET /api/faculty/students - Returns only students in faculty's allocated sections
 @faculty_bp.route('/students', methods=['GET'])
 @token_required
 def get_students():
+    """Returns only students in sections allocated to this faculty"""
     course   = request.args.get('course')
     semester = request.args.get('semester')
     section  = request.args.get('section')
-
-    query  = "SELECT id,name,enroll,course,semester,section FROM users WHERE role='student'"
-    params = []
-    if course:   query += " AND course=?";   params.append(course)
-    if semester: query += " AND semester=?"; params.append(semester)
-    if section:  query += " AND (section=? OR section IS NULL OR section='')";  params.append(section)
-    query += " ORDER BY name"
+    is_admin = request.user_role == 'admin'
 
     conn = get_db()
+
+    if is_admin:
+        query = "SELECT id,name,enroll,course,semester,section FROM users WHERE role='student'"
+        params = []
+        if course:   query += " AND course=?";   params.append(course)
+        if semester: query += " AND semester=?"; params.append(semester)
+        if section:  query += " AND section=?";  params.append(section)
+        query += " ORDER BY name"
+        rows = conn.execute(query, params).fetchall()
+        conn.close()
+        return jsonify([dict(r) for r in rows])
+
+    # First get all sections allocated to this faculty
+    alloc_query = "SELECT DISTINCT section FROM faculty_allocations WHERE faculty_id=?"
+    alloc_params = [request.user_id]
+    
+    if course:   alloc_query += " AND course=?";   alloc_params.append(course)
+    if semester: alloc_query += " AND semester=?"; alloc_params.append(semester)
+    
+    sections = conn.execute(alloc_query, alloc_params).fetchall()
+    section_list = [s['section'] for s in sections if s['section']]
+    
+    if not section_list:
+        conn.close()
+        return jsonify([])
+
+    # Build query for students in allocated sections
+    placeholders = ','.join('?' * len(section_list))
+    query  = f"SELECT id,name,enroll,course,semester,section FROM users WHERE role='student' AND section IN ({placeholders})"
+    params = section_list
+    
+    if course:   query += " AND course=?";   params.append(course)
+    if semester: query += " AND semester=?"; params.append(semester)
+    if section:  query += " AND section=?";  params.append(section)
+    query += " ORDER BY name"
+
     rows = conn.execute(query, params).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
 
-# ── GET /api/faculty/subjects ─────────────────────────────────────────────────
+# ── GET /api/faculty/subjects - Returns only subjects allocated to this faculty
 @faculty_bp.route('/subjects', methods=['GET'])
 @token_required
 def get_subjects():
+    """Returns only subjects allocated to the logged-in faculty member"""
     course   = request.args.get('course')
     semester = request.args.get('semester')
+    is_admin = request.user_role == 'admin'
 
-    query  = "SELECT * FROM subjects WHERE 1=1"
-    params = []
-    if course:   query += " AND course=?";   params.append(course)
-    if semester: query += " AND semester=?"; params.append(semester)
-    query += " ORDER BY semester, name"
+    if is_admin:
+        query = "SELECT * FROM subjects WHERE 1=1"
+        params = []
+        if course:   query += " AND course=?";   params.append(course)
+        if semester: query += " AND semester=?"; params.append(semester)
+        query += " ORDER BY semester, name"
+    else:
+        query  = """
+            SELECT DISTINCT s.* FROM subjects s
+            INNER JOIN faculty_allocations fa ON fa.subject_id = s.id
+            WHERE fa.faculty_id = ?
+        """
+        params = [request.user_id]
+        if course:   query += " AND s.course=?";   params.append(course)
+        if semester: query += " AND s.semester=?"; params.append(semester)
+        query += " ORDER BY s.semester, s.name"
 
     conn = get_db()
     rows = conn.execute(query, params).fetchall()
@@ -76,36 +141,75 @@ def get_subjects():
     return jsonify([dict(r) for r in rows])
 
 
-# ── GET /api/faculty/marks?course=MCA&semester=Sem1&subject_id=1&exam_type=CIE1
+# ── GET /api/faculty/marks - Returns marks only for faculty's allocated subjects
 @faculty_bp.route('/marks', methods=['GET'])
 @token_required
 def get_marks():
+    """Returns marks only for subjects allocated to this faculty"""
     subject_id = request.args.get('subject_id')
     exam_type  = request.args.get('exam_type')
     course     = request.args.get('course')
     semester   = request.args.get('semester')
     section    = request.args.get('section')
 
-    query  = """
-        SELECT m.id AS mark_id, u.id AS student_id, u.name, u.enroll,
-               m.marks, m.max_marks, m.exam_type,
-               ROUND(m.marks*100.0/m.max_marks,1) AS pct,
-               s.name AS subject
-        FROM users u
-        LEFT JOIN marks m ON m.student_id=u.id
-            AND (?1 IS NULL OR m.subject_id=?1)
-            AND (?2 IS NULL OR m.exam_type=?2)
-        LEFT JOIN subjects s ON s.id=m.subject_id
-        WHERE u.role='student'
-    """
-    params = [subject_id, exam_type]
+    conn = get_db()
+    is_admin = request.user_role == 'admin'
+    
+    # Check if subject_id is allocated to this faculty
+    if subject_id and not is_admin:
+        allowed = conn.execute(
+            "SELECT id FROM faculty_allocations WHERE faculty_id=? AND subject_id=?",
+            (request.user_id, subject_id)
+        ).fetchone()
+        if not allowed:
+            conn.close()
+            return jsonify({'error': 'Not authorized for this subject'}), 403
+
+    if is_admin:
+        query  = """
+            SELECT m.id AS mark_id, u.id AS student_id, u.name, u.enroll,
+                   m.marks, m.max_marks, m.exam_type,
+                   ROUND(m.marks*100.0/m.max_marks,1) AS pct,
+                   s.name AS subject
+            FROM users u
+            LEFT JOIN marks m ON m.student_id=u.id
+                AND (?1 IS NULL OR m.subject_id=?1)
+                AND (?2 IS NULL OR m.exam_type=?2)
+            LEFT JOIN subjects s ON s.id=m.subject_id
+            WHERE u.role='student'
+        """
+        params = [subject_id, exam_type]
+    else:
+        query  = """
+            SELECT m.id AS mark_id, u.id AS student_id, u.name, u.enroll,
+                   m.marks, m.max_marks, m.exam_type,
+                   ROUND(m.marks*100.0/m.max_marks,1) AS pct,
+                   s.name AS subject
+            FROM users u
+            LEFT JOIN marks m ON m.student_id=u.id
+                AND (?1 IS NULL OR m.subject_id=?1)
+                AND (?2 IS NULL OR m.exam_type=?2)
+                AND (?1 IS NOT NULL OR m.subject_id IN (
+                    SELECT subject_id FROM faculty_allocations
+                    WHERE faculty_id=?3
+                      AND (?4 IS NULL OR course=?4)
+                      AND (?5 IS NULL OR semester=?5)
+                      AND (?6 IS NULL OR section=?6)
+                ))
+            LEFT JOIN subjects s ON s.id=m.subject_id
+            WHERE u.role='student'
+                AND u.section IN (
+                    SELECT DISTINCT section FROM faculty_allocations 
+                    WHERE faculty_id=?3
+                )
+        """
+        params = [subject_id, exam_type, request.user_id, course, semester, section]
 
     if course:   query += " AND u.course=?";   params.append(course)
     if semester: query += " AND u.semester=?"; params.append(semester)
-    if section:  query += " AND (u.section=? OR u.section IS NULL OR u.section='')";  params.append(section)
+    if section:  query += " AND u.section=?";  params.append(section)
     query += " ORDER BY u.name"
 
-    conn = get_db()
     rows = conn.execute(query, params).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
@@ -126,6 +230,17 @@ def enter_marks():
         return jsonify({'error': 'student_id, subject_id, exam_type, marks required'}), 400
 
     conn = get_db()
+    
+    # Check if faculty is allocated this subject
+    allowed = conn.execute(
+        "SELECT id FROM faculty_allocations WHERE faculty_id=? AND subject_id=?",
+        (request.user_id, subj)
+    ).fetchone()
+    
+    if not allowed:
+        conn.close()
+        return jsonify({'error': 'Not authorized for this subject'}), 403
+
     conn.execute("""
         INSERT INTO marks (student_id,subject_id,exam_type,marks,max_marks,entered_by)
         VALUES (?,?,?,?,?,?)
@@ -177,27 +292,57 @@ def delete_mark(mark_id):
     return jsonify({'message': 'Mark deleted'})
 
 
-# ── GET /api/faculty/class-results ───────────────────────────────────────────
+# ── GET /api/faculty/class-results - Returns results only for faculty's allocations
 @faculty_bp.route('/class-results', methods=['GET'])
 @token_required
 def class_results():
-    """Returns full result table like FacultyDashboard's studentResultsData"""
+    """Returns result table only for subjects/sections allocated to this faculty"""
     course   = request.args.get('course', 'MCA')
     semester = request.args.get('semester', 'Sem1')
+    exam_type = request.args.get('exam_type', 'CIE1')
+    is_admin = request.user_role == 'admin'
 
     conn = get_db()
 
-    # Get students
-    students = conn.execute(
-        "SELECT id,name,enroll FROM users WHERE role='student' AND course=? AND semester=? ORDER BY name",
-        (course, semester)
-    ).fetchall()
+    if is_admin:
+        students = conn.execute(
+            "SELECT id,name,enroll,section FROM users WHERE role='student' AND course=? AND semester=? ORDER BY name",
+            (course, semester)
+        ).fetchall()
+        subjects = conn.execute(
+            "SELECT id,name,code FROM subjects WHERE course=? AND semester=? ORDER BY name",
+            (course, semester)
+        ).fetchall()
+    else:
+        # Get faculty's allocated sections for this course/semester
+        allocations = conn.execute(
+            """SELECT DISTINCT section FROM faculty_allocations 
+               WHERE faculty_id=? AND course=? AND semester=?""",
+            (request.user_id, course, semester)
+        ).fetchall()
+        
+        sections = [a['section'] for a in allocations if a['section']]
+        if not sections:
+            conn.close()
+            return jsonify({'students': [], 'subjects': []})
 
-    # Get all subjects for this course/semester
-    subjects = conn.execute(
-        "SELECT id, name, code FROM subjects WHERE course=? AND semester=? ORDER BY name",
-        (course, semester)
-    ).fetchall()
+        # Get students in allocated sections
+        placeholders = ','.join('?' * len(sections))
+        students = conn.execute(
+            f"""SELECT id,name,enroll FROM users 
+               WHERE role='student' AND course=? AND semester=? AND section IN ({placeholders}) 
+               ORDER BY name""",
+            (course, semester, *sections)
+        ).fetchall()
+
+        # Get faculty's allocated subjects for this course/semester
+        subjects = conn.execute(
+            """SELECT DISTINCT s.id, s.name, s.code FROM subjects s
+               INNER JOIN faculty_allocations fa ON fa.subject_id = s.id
+               WHERE fa.faculty_id=? AND s.course=? AND s.semester=?
+               ORDER BY s.name""",
+            (request.user_id, course, semester)
+        ).fetchall()
 
     result = []
     for st in students:
@@ -206,7 +351,7 @@ def class_results():
         for sub in subjects:
             m = conn.execute(
                 "SELECT marks FROM marks WHERE student_id=? AND subject_id=? AND exam_type=?",
-                (st['id'], sub['id'], request.args.get('exam_type', 'CIE1'))
+                (st['id'], sub['id'], exam_type)
             ).fetchone()
             mark = m['marks'] if m else 0
             row[sub['code'].lower()] = mark

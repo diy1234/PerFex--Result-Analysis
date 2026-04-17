@@ -133,6 +133,12 @@ export const facultyAPI = {
   updateProfile: (data)  => api('/faculty/profile', { method: 'PUT', body: JSON.stringify(data) }),
 
   /**
+   * Get faculty's subject allocations (courses, semesters, subjects, sections)
+   * Replaces hardcoded dropdowns in FacultyDashboard.js
+   */
+  getAllocations: () => api('/faculty/allocations'),
+
+  /**
    * Get student list for a course/semester.
    * Replaces allMarksData filtering in FacultyDashboard.js
    */

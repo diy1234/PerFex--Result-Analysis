@@ -62,7 +62,7 @@ def list_users():
 
     role = request.args.get('role')
     conn = get_db()
-    q    = "SELECT id,name,email,role,enroll,course,semester,section,faculty_id,department,subject,created_at FROM users WHERE role != 'admin'"
+    q    = "SELECT id,name,email,role,enroll,course,semester,section,faculty_id,department,created_at FROM users WHERE role != 'admin'"
     p    = []
     if role:
         q += " AND role=?"; p.append(role)
@@ -92,11 +92,11 @@ def create_user():
     conn = get_db()
     try:
         conn.execute("""
-            INSERT INTO users (name,email,password,role,enroll,course,semester,section,faculty_id,department,subject)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO users (name,email,password,role,enroll,course,semester,section,faculty_id,department)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
         """, (name, email, generate_password_hash(pwd), role,
               d.get('enroll'), d.get('course'), d.get('semester'),
-              d.get('section'), d.get('faculty_id'), d.get('department'), d.get('subject')))
+              d.get('section'), d.get('faculty_id'), d.get('department')))
         conn.commit()
     except Exception as e:
         conn.close()

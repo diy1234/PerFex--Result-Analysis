@@ -89,6 +89,18 @@ def init_db():
         date           TEXT DEFAULT (date('now'))
     )''')
 
+    # ── faculty_allocations ──────────────────────────────────────────────────
+    # Links faculty to subjects they teach in specific courses/semesters/sections
+    c.execute('''CREATE TABLE IF NOT EXISTS faculty_allocations (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        faculty_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        subject_id  INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+        course      TEXT NOT NULL,
+        semester    TEXT NOT NULL,
+        section     TEXT,
+        UNIQUE(faculty_id, subject_id, course, semester, section)
+    )''')
+
     conn.commit()
     conn.close()
     print("✅  Database ready — perfex.db")
@@ -117,11 +129,37 @@ def _seed():
 
     # Default student
     if not c.execute("SELECT id FROM users WHERE role='student'").fetchone():
-        c.execute("""INSERT INTO users (name,email,password,role,enroll,course,semester)
-                     VALUES (?,?,?,?,?,?,?)""",
+        c.execute("""INSERT INTO users (name,email,password,role,enroll,course,semester,section)
+                     VALUES (?,?,?,?,?,?,?,?)""",
                   ("Riya Sharma", "riya@jims.edu",
-                   generate_password_hash("Student@123"), "student", "22101", "MCA", "Sem1"))
+                   generate_password_hash("Student@123"), "student", "22101", "MCA", "Sem1", "A"))
         print("  → Student: riya@jims.edu / Student@123")
+    else:
+        # Ensure sample student has a section if missing, so faculty allocation filtering returns records
+        c.execute("UPDATE users SET section='A' WHERE role='student' AND course='MCA' AND semester='Sem1' AND (section IS NULL OR section='')")
+
+    # Add dummy students: 5 in A section, 5 in B section
+    dummy_students = [
+        # Section A (4 more + existing Riya = 5 total)
+        ("Amit Kumar", "amit@jims.edu", "22102", "A"),
+        ("Priya Singh", "priya@jims.edu", "22103", "A"),
+        ("Rahul Verma", "rahul@jims.edu", "22104", "A"),
+        ("Sneha Patel", "sneha@jims.edu", "22105", "A"),
+        # Section B (5 students)
+        ("Vikram Joshi", "vikram@jims.edu", "22106", "B"),
+        ("Anjali Gupta", "anjali@jims.edu", "22107", "B"),
+        ("Karan Mehta", "karan@jims.edu", "22108", "B"),
+        ("Neha Sharma", "neha@jims.edu", "22109", "B"),
+        ("Rohit Jain", "rohit@jims.edu", "22110", "B"),
+    ]
+    
+    for name, email, enroll, section in dummy_students:
+        # Delete if exists to ensure fresh data
+        c.execute("DELETE FROM users WHERE email=?", (email,))
+        c.execute("""INSERT INTO users (name,email,password,role,enroll,course,semester,section)
+                     VALUES (?,?,?,?,?,?,?,?)""",
+                  (name, email, generate_password_hash("Student@123"), "student", enroll, "MCA", "Sem1", section))
+        print(f"  → Student: {email} / Student@123")
 
     # Subjects
     subs = [
@@ -138,22 +176,16 @@ def _seed():
     for s in subs:
         c.execute("INSERT OR IGNORE INTO subjects (name,code,course,semester) VALUES (?,?,?,?)", s)
 
-    # Sample student marks for Riay Sharma only
-    student = c.execute("SELECT id FROM users WHERE email=?", ("riya@jims.edu",)).fetchone()
-    if student:
-        subject_rows = c.execute("SELECT id, code, semester FROM subjects WHERE course='MCA'").fetchall()
-        exam_types = ["CIE1", "CIE2", "Internal1", "Internal2"]
+    # Sample student marks for all MCA Sem1 students
+    students = c.execute("SELECT id, name FROM users WHERE role='student' AND course='MCA' AND semester='Sem1'").fetchall()
+    subject_rows = c.execute("SELECT id, code, semester FROM subjects WHERE course='MCA' AND semester='Sem1'").fetchall()
+    exam_types = ["CIE1", "CIE2", "Internal1", "Internal2"]
 
+    for student in students:
         for subject_index, subject in enumerate(subject_rows):
-            semester_offset = {
-                'Sem1': 0,
-                'Sem2': 4,
-                'Sem3': 8,
-                'Sem4': 12,
-            }.get(subject['semester'], 0)
-
             for exam_index, exam_type in enumerate(exam_types):
-                base_mark = 70 + semester_offset + ((subject_index % 5) * 2)
+                # Vary marks based on student and subject
+                base_mark = 70 + ((student['id'] % 5) * 3) + ((subject_index % 4) * 2)
                 exam_adjust = [8, 6, 4, 5][exam_index]
                 marks = min(96.0, base_mark + exam_adjust)
                 c.execute(
@@ -173,6 +205,24 @@ def _seed():
         for a in ann:
             c.execute("INSERT INTO announcements (title,message,type,course,semester,subject,class,posted_by) VALUES (?,?,?,?,?,?,?,?)",
                       (*a, fac_id))
+
+    # Faculty allocations - assign subjects to faculty for specific course/semester/section
+    if not c.execute("SELECT id FROM faculty_allocations").fetchone():
+        fac = c.execute("SELECT id FROM users WHERE role='faculty' LIMIT 1").fetchone()
+        if fac:
+            fac_id = fac['id']
+            # Get subjects for MCA Sem1 and Sem2
+            subjects = c.execute("SELECT id, course, semester FROM subjects WHERE course='MCA'").fetchall()
+            allocations = [
+                # Dr. Rajesh Kumar teaches specific subjects in MCA Sem1
+                (fac_id, subjects[0]['id'], 'MCA', 'Sem1', 'A'),  # DBMS - Section A
+                (fac_id, subjects[0]['id'], 'MCA', 'Sem1', 'B'),  # DBMS - Section B
+                (fac_id, subjects[1]['id'], 'MCA', 'Sem1', 'A'),  # OS - Section A
+                # Dr. Rajesh Kumar teaches in MCA Sem2
+                (fac_id, subjects[5]['id'], 'MCA', 'Sem2', 'A'),  # Java - Section A
+            ]
+            for alloc in allocations:
+                c.execute("INSERT OR IGNORE INTO faculty_allocations (faculty_id, subject_id, course, semester, section) VALUES (?,?,?,?,?)", alloc)
 
     conn.commit()
     conn.close()
