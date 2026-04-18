@@ -1,12 +1,5 @@
 import React, { useState } from "react";
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   AIInsight  –  Drop-in Claude-powered analysis panel
-   Props:
-     role        "student" | "faculty" | "admin"
-     dataContext  string describing the current data snapshot
-     dark        boolean  (matches parent dashboard theme)
-─────────────────────────────────────────────────────────────────────────────── */
 function AIInsight({ role = "student", dataContext = "", dark = true }) {
 
   const [question, setQuestion] = useState("");
@@ -14,14 +7,10 @@ function AIInsight({ role = "student", dataContext = "", dark = true }) {
   const [loading,  setLoading]  = useState(false);
   const [asked,    setAsked]    = useState(false);
 
-  /* ── theme tokens matching StudentDashboard / FacultyDashboard ─────────── */
   const T = dark
-    ? { bg:"#0f172a", surface:"#1e293b", border:"#2a3348", text:"#e2e8f0",
-        textSub:"#94a3b8", accent:"#3b82f6", accentSoft:"rgba(59,130,246,0.08)" }
-    : { bg:"#f1f5f9", surface:"#ffffff", border:"#e2e8f0", text:"#1e293b",
-        textSub:"#64748b", accent:"#2563eb", accentSoft:"rgba(37,99,235,0.06)" };
+    ? { bg:"#0f172a", surface:"#1e293b", border:"#2a3348", text:"#e2e8f0", textSub:"#94a3b8", accent:"#3b82f6", accentSoft:"rgba(59,130,246,0.08)" }
+    : { bg:"#f1f5f9", surface:"#ffffff", border:"#e2e8f0", text:"#1e293b", textSub:"#64748b", accent:"#2563eb", accentSoft:"rgba(37,99,235,0.06)" };
 
-  /* ── role-specific quick chips ─────────────────────────────────────────── */
   const chips = {
     student: [
       "Which subjects do I need to focus on most?",
@@ -43,7 +32,11 @@ function AIInsight({ role = "student", dataContext = "", dark = true }) {
     ],
   };
 
-  /* ── AI call ────────────────────────────────────────────────────────────── */
+  const systemPrompt = `You are an AI academic performance analyst for a college Result Analysis Dashboard called PREFEX Result Analyzer.
+The viewer role is: ${role}.
+Answer concisely in under 180 words. Use plain text only, no markdown, no asterisks, no bullet symbols.
+Always reference the provided data. Give specific, actionable recommendations.`;
+
   const askAI = async (preset) => {
     const q = (preset || question).trim();
     if (!q) return;
@@ -53,158 +46,102 @@ function AIInsight({ role = "student", dataContext = "", dark = true }) {
     setAnswer("");
 
     try {
-      console.log("🔵 Calling AI Server at http://localhost:5001/api/ai");
-      
-      const res = await fetch("http://localhost:5001/api/ai", {
+      const res = await fetch("http://localhost:5001/api/ai", { // ✅ CHANGED to port 5001
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          system: `You are an AI academic performance analyst for a college Result Analysis Dashboard (PERFEX Result Analyzer).
-The viewer role is: ${role}.
-Answer concisely in under 180 words. Use plain text only — no markdown, no bullet symbols, no asterisks.
-Always reference the data provided. Give specific, actionable recommendations.`,
+          system: systemPrompt,
           userMessage: `Current data snapshot:\n${dataContext || "No data provided."}\n\nQuestion: ${q}`,
         }),
       });
 
-      console.log("📨 Response status:", res.status, res.statusText);
-
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        console.error("❌ Server error:", errorData);
-        setAnswer(`Error: ${errorData.details || errorData.error || 'Server returned ' + res.status}`);
+        const err = await res.json().catch(() => ({}));
+        setAnswer(`Server error: ${err.error || res.statusText}.\nMake sure your ai-server is running: cd ai-server && node server.js`);
+        setLoading(false);
         return;
       }
 
       const data = await res.json();
-      console.log("✅ AI Response:", data);
 
-      if (data.error) {
-        setAnswer(`Error: ${data.details || data.error}`);
-      } else if (data.reply) {
-        setAnswer(data.reply);
-      } else {
-        setAnswer("No response received.");
-      }
-    } catch (err) {
-      console.error("❌ Fetch Error:", err.message);
-      setAnswer(`Connection Error: ${err.message}\n\n⚠️ Make sure AI Server is running:\ncd backend/ai-server\nnpm start`);
+      const text =
+        data.content?.filter(b => b.type === "text").map(b => b.text).join("\n") ||
+        data.reply ||
+        "No response received.";
+
+      setAnswer(text);
+
+    } catch {
+      setAnswer(
+        "Unable to connect to AI server.\n" +
+        "Fix: Open a terminal, go to your ai-server folder and run:\n" +
+        "  node server.js\n" +
+        "Make sure port 5001 is free and GROQ_API_KEY is in your .env file."
+      );
     }
 
     setLoading(false);
   };
 
-  /* ── styles ────────────────────────────────────────────────────────────── */
-  const wrap = {
-    background: T.surface,
-    border: `1px solid ${T.border}`,
-    borderLeft: `3px solid ${T.accent}`,
-    borderRadius: 12,
-    padding: "20px 24px",
-    marginTop: 24,
-  };
-  const header = {
-    display: "flex", alignItems: "center", gap: 10, marginBottom: 14,
-  };
-  const titleStyle = {
-    fontSize: 15, fontWeight: 700, color: T.text,
-  };
-  const badgeStyle = {
-    fontSize: 11, fontWeight: 600,
-    background: dark ? "#1e1b4b" : "#ede9fe",
-    color: dark ? "#a78bfa" : "#6d28d9",
-    border: `1px solid ${dark ? "#312e81" : "#c4b5fd"}`,
-    padding: "3px 10px", borderRadius: 20,
-  };
-  const chipRow = {
-    display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14,
-  };
   const chipStyle = {
-    fontSize: 12, padding: "6px 14px",
-    background: T.accentSoft,
-    border: `1px solid ${dark ? "#1e3a6e" : "#bfdbfe"}`,
-    borderRadius: 20, color: dark ? "#93c5fd" : "#1d4ed8",
-    cursor: "pointer", fontFamily: "inherit",
-    transition: "all 0.15s",
-  };
-  const inputRow = {
-    display: "flex", gap: 8, marginBottom: 14,
-  };
-  const inputStyle = {
-    flex: 1, padding: "10px 14px",
-    background: dark ? "#0f172a" : "#f8fafc",
-    border: `1px solid ${T.border}`,
-    borderRadius: 8, color: T.text, fontSize: 13,
-    outline: "none", fontFamily: "inherit",
-  };
-  const btnStyle = {
-    padding: "10px 20px",
-    background: T.accent, color: "#fff",
-    border: "none", borderRadius: 8,
-    fontSize: 13, fontWeight: 600,
-    cursor: "pointer", whiteSpace: "nowrap",
-    fontFamily: "inherit",
-  };
-  const answerBox = {
-    fontSize: 13, color: loading ? T.textSub : T.text,
-    lineHeight: 1.8, whiteSpace: "pre-wrap",
-    minHeight: 56,
-    background: dark ? "#0f172a" : "#f8fafc",
-    border: `1px solid ${T.border}`,
-    borderRadius: 8, padding: "12px 16px",
-    fontStyle: loading ? "italic" : "normal",
-    transition: "all 0.2s",
+    fontSize:12, padding:"6px 14px",
+    background:T.accentSoft, border:`1px solid ${dark?"#1e3a6e":"#bfdbfe"}`,
+    borderRadius:20, color:dark?"#93c5fd":"#1d4ed8",
+    cursor:"pointer", fontFamily:"inherit", transition:"all 0.15s",
   };
 
   return (
-    <div style={wrap}>
+    <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderLeft:`3px solid ${T.accent}`, borderRadius:12, padding:"20px 24px", marginTop:24 }}>
+
       {/* Header */}
-      <div style={header}>
-        <span style={{ fontSize: 18 }}>✦</span>
-        <span style={titleStyle}>AI Insight Engine</span>
-        <span style={badgeStyle}>Gemini-powered</span>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
+        <span>✦</span>
+        <span style={{ fontSize:15, fontWeight:700, color:T.text }}>AI Insight Engine</span>
+        <span style={{ fontSize:11, fontWeight:600, background:dark?"#1e1b4b":"#ede9fe", color:dark?"#a78bfa":"#6d28d9", border:`1px solid ${dark?"#312e81":"#c4b5fd"}`, padding:"3px 10px", borderRadius:20 }}>
+          Groq-powered
+        </span>
       </div>
 
       {/* Quick chips */}
-      <div style={chipRow}>
-        {chips[role]?.map((c, i) => (
+      <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:14 }}>
+        {(chips[role] || []).map((c, i) => (
           <button key={i} style={chipStyle} onClick={() => askAI(c)}
-            onMouseEnter={e => { e.currentTarget.style.background = T.accent; e.currentTarget.style.color = "#fff"; }}
-            onMouseLeave={e => { e.currentTarget.style.background = T.accentSoft; e.currentTarget.style.color = dark ? "#93c5fd" : "#1d4ed8"; }}>
+            onMouseEnter={e => { e.currentTarget.style.background=T.accent; e.currentTarget.style.color="#fff"; }}
+            onMouseLeave={e => { e.currentTarget.style.background=T.accentSoft; e.currentTarget.style.color=dark?"#93c5fd":"#1d4ed8"; }}>
             {c}
           </button>
         ))}
       </div>
 
       {/* Input */}
-      <div style={inputRow}>
+      <div style={{ display:"flex", gap:8, marginBottom:14 }}>
         <input
-          style={inputStyle}
+          style={{ flex:1, padding:"10px 14px", background:dark?"#0f172a":"#f8fafc", border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontSize:13, outline:"none", fontFamily:"inherit" }}
           type="text"
-          placeholder={`Ask anything about this ${role === "student" ? "student's" : role === "faculty" ? "class"  : "institution's"} performance data…`}
+          placeholder="Ask anything about the performance data…"
           value={question}
           onChange={e => setQuestion(e.target.value)}
           onKeyDown={e => e.key === "Enter" && askAI()}
-          onFocus={e  => { e.target.style.borderColor = T.accent; }}
-          onBlur={e   => { e.target.style.borderColor = T.border; }}
+          onFocus={e => { e.target.style.borderColor=T.accent; }}
+          onBlur={e  => { e.target.style.borderColor=T.border; }}
         />
-        <button style={btnStyle} onClick={() => askAI()}
-          onMouseEnter={e => e.currentTarget.style.opacity = "0.85"}
-          onMouseLeave={e => e.currentTarget.style.opacity = "1"}>
+        <button
+          style={{ padding:"10px 20px", background:T.accent, color:"#fff", border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}
+          onClick={() => askAI()}>
           Ask AI →
         </button>
       </div>
 
       {/* Answer */}
       {(asked || loading) && (
-        <div style={answerBox}>
+        <div style={{ fontSize:13, color:loading?T.textSub:T.text, lineHeight:1.8, whiteSpace:"pre-wrap", minHeight:56, background:dark?"#0f172a":"#f8fafc", border:`1px solid ${T.border}`, borderRadius:8, padding:"12px 16px", fontStyle:loading?"italic":"normal" }}>
           {loading ? "Analyzing data, please wait…" : answer}
         </div>
       )}
 
       {!asked && (
-        <div style={{ fontSize: 12, color: T.textSub, textAlign: "center", padding: "8px 0" }}>
-          Click a quick insight above or type your own question and press Enter.
+        <div style={{ fontSize:12, color:T.textSub, textAlign:"center", padding:"8px 0" }}>
+          Click a quick insight above or type your question and press Enter.
         </div>
       )}
     </div>

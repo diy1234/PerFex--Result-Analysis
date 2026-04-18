@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const Groq = require("groq-sdk");
 require("dotenv").config();
 
 const app = express();
@@ -7,64 +8,76 @@ const app = express();
 app.use(cors({ origin: "http://localhost:3000" }));
 app.use(express.json());
 
-console.log("Starting AI server...");
+console.log("Starting AI server with Groq...");
 
-// ✅ Test route
-app.get("/", (req, res) => {
-  res.send("AI Server running ✅");
+// Check API key on startup
+if (!process.env.GROQ_API_KEY) {
+  console.error("❌ GROQ_API_KEY not found in .env file!");
+  console.error("   Add this to your .env file:  GROQ_API_KEY=gsk_...your_key_here");
+  console.error("   Get a FREE key at: https://console.groq.com");
+} else {
+  console.log("✅ GROQ_API_KEY found");
+}
+
+// Initialize Groq
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY || "",
 });
 
-// ✅ FINAL AI ROUTE (SMART RULE-BASED)
+// Test route
+app.get("/", (req, res) => {
+  res.send("AI Server running with Groq on port 5001 ✅");
+});
+
+// Main AI route
 app.post("/api/ai", async (req, res) => {
   console.log("📨 Received AI request");
 
-  const { userMessage } = req.body;
+  const { system, userMessage } = req.body;
 
   if (!userMessage) {
     return res.status(400).json({ error: "userMessage is required" });
   }
 
+  if (!process.env.GROQ_API_KEY) {
+    return res.status(500).json({ error: "GROQ_API_KEY not configured in .env" });
+  }
+
   try {
-    const msg = userMessage.toLowerCase();
-    let reply = "";
+    const messages = [];
 
-    // 🔥 Different logic for each type
-
-    if (msg.includes("risk") || msg.includes("fail")) {
-      reply =
-        "Students like Riya Sharma and Amit Kumar are at risk of failing. Immediate attention is required in Operating Systems (OS).";
-    } 
-    else if (msg.includes("weak") || msg.includes("area")) {
-      reply =
-        "The weakest subject across the class is Operating Systems (OS), where most students have very low or zero marks.";
-    } 
-    else if (msg.includes("compare") || msg.includes("top") || msg.includes("bottom")) {
-      reply =
-        "Top students like Sneha Patel and Rahul Verma are performing consistently well, while bottom students are struggling mainly in OS and DBMS.";
-    } 
-    else if (msg.includes("intervention") || msg.includes("suggest")) {
-      reply =
-        "Faculty should focus on extra classes for weak subjects, personalized mentoring, and regular assessments to improve student performance.";
-    } 
-    else {
-      reply =
-        "Overall class performance is moderate. Focus should be on improving weak subjects and supporting at-risk students.";
+    if (system) {
+      messages.push({ role: "system", content: system });
     }
 
-    res.json({ reply });
+    messages.push({ role: "user", content: userMessage });
+
+    console.log("📤 Sending to Groq...");
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages,
+      max_tokens: 1000,
+    });
+
+    const text = completion.choices[0].message.content;
+
+    console.log("✅ Groq responded successfully");
+    res.json({
+      content: [{ type: "text", text }],
+    });
 
   } catch (error) {
-    console.error("❌ Server error:", error.message);
+    console.error("❌ Groq error:", error.message);
 
-    res.json({
-      reply: "AI analysis generated successfully."
+    res.status(500).json({
+      error: error.message,
+      hint: "Check your GROQ_API_KEY in .env — get a free key at https://console.groq.com"
     });
   }
 });
 
-// ✅ Start server
+// Start server on port 5001 ✅ CHANGED from 5000
 const PORT = 5001;
-
 app.listen(PORT, () => {
-  console.log(`AI Server running on http://localhost:${PORT}`);
+  console.log(`✅ AI Server running on http://localhost:${PORT}`);
 });
