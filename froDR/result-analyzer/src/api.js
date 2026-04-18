@@ -179,7 +179,7 @@ export const facultyAPI = {
     api('/faculty/marks/bulk', { method: 'POST', body: JSON.stringify({ entries }) }),
 
   /**
-   * Full result table for ViewResults / class overview.
+   * Final result table for ViewResults / class overview.
    * Returns { students, subjects }
    */
   getClassResults: (filters = {}) => {

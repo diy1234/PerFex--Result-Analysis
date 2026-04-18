@@ -54,7 +54,8 @@
 }
 
 .student-table th {
-  background: rgba(15, 23, 42, 0.04);
+  background: #1e293b;
+  color: #ffffff;
   font-weight: 700;
 }
 

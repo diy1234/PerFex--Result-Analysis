@@ -239,7 +239,7 @@ function StudentDashboard({ setDashboard, setPage }) {
   };
 
   const barColors = ["#3b82f6","#22c55e","#f59e0b","#a855f7","#06b6d4"];
-  const barData   = { labels:subjects.map(s=>s.name), datasets:[{ label:"Marks", data:subjects.map(s=>s.marks), backgroundColor:subjects.map((_,i)=>barColors[i%barColors.length]), borderRadius:6, borderSkipped:false }] };
+  const barData   = { labels:subjects.map(s=>s.name), datasets:subjects.map((subject,index)=>({ label:subject.name, data:subjects.map(s=>s.name===subject.name?s.marks:null), backgroundColor:barColors[index%barColors.length], borderRadius:6, borderSkipped:false })) };
   const lineData  = { labels:semesterMarks.map(s=>s.sem), datasets:[{ label:"CGPA", data:semesterMarks.map(s=>s.cgpa), borderColor:"#f59e0b", backgroundColor:"rgba(245,158,11,0.1)", tension:0.4, pointBackgroundColor:"#f59e0b", pointRadius:5, fill:true }] };
   const donutData = { labels:["Passed","Failed"], datasets:[{ data:[passCount,failCount], backgroundColor:["#22c55e","#ef4444"], borderWidth:0, hoverOffset:4 }] };
   const donutOptions = { responsive:true, cutout:"70%", plugins:{ legend:{ position:"bottom", labels:{ color:legendColor, padding:16, font:{size:12} } }, tooltip:{ backgroundColor:dark?"#1e293b":"#fff", titleColor:dark?"#e2e8f0":"#1e293b", bodyColor:dark?"#94a3b8":"#475569", borderColor:dark?"#334155":"#e2e8f0", borderWidth:1 } } };
@@ -481,7 +481,7 @@ function StudentDashboard({ setDashboard, setPage }) {
                   <option>Sem1</option><option>Sem2</option><option>Sem3</option><option>Sem4</option>
                 </select>
                 <select style={s.select} value={pendingExam} onChange={e=>setPendingExam(e.target.value)}>
-                  <option>CIE1</option><option>CIE2</option><option>Internal1</option><option>Internal2</option>
+                  <option value="CIE1">CIE1</option><option value="CIE2">CIE2</option><option value="Internal1">Internal1</option><option value="Internal2">Internal2</option><option value="FULLRESULT">Final Result</option>
                 </select>
                 <button style={s.applyBtn} onClick={applyFilters}>Apply</button>
               </div>
@@ -561,7 +561,7 @@ function StudentDashboard({ setDashboard, setPage }) {
               <div style={s.filterBar}>
                 <FilterSelect value={pendingCourse} onChange={setPendingCourse} options={["MCA"]} dark={dark} t={t} />
                 <FilterSelect value={pendingSem}    onChange={setPendingSem}    options={["Sem1","Sem2","Sem3","Sem4"]} dark={dark} t={t} />
-                <FilterSelect value={pendingExam}   onChange={setPendingExam}   options={["CIE1","CIE2","Internal1","Internal2"]} dark={dark} t={t} />
+                <FilterSelect value={pendingExam}   onChange={setPendingExam}   options={["CIE1","CIE2","Internal1","Internal2","FULLRESULT"]} dark={dark} t={t} />
                 <button style={s.applyBtn} onClick={applyFilters}>Apply</button>
               </div>
 
@@ -656,7 +656,7 @@ function StudentDashboard({ setDashboard, setPage }) {
                     <label style={s.label}>Exam Type *</label>
                     <select style={{ ...s.input, cursor:"pointer" }} value={concernForm.examType}
                       onChange={e=>setConcernForm(f=>({...f, examType:e.target.value}))}>
-                      <option>CIE1</option><option>CIE2</option><option>Internal1</option><option>Internal2</option>
+                      <option value="CIE1">CIE1</option><option value="CIE2">CIE2</option><option value="Internal1">Internal1</option><option value="Internal2">Internal2</option><option value="FULLRESULT">Final Result</option>
                     </select>
                   </div>
                   <div>
@@ -835,7 +835,7 @@ function StudentDashboard({ setDashboard, setPage }) {
               <div style={s.filterBar}>
                 <FilterSelect value={pendingCourse} onChange={setPendingCourse} options={["MCA"]} dark={dark} t={t} />
                 <FilterSelect value={pendingSem}    onChange={setPendingSem}    options={["Sem1","Sem2","Sem3","Sem4"]} dark={dark} t={t} />
-                <FilterSelect value={pendingExam}   onChange={setPendingExam}   options={["CIE1","CIE2","Internal1","Internal2"]} dark={dark} t={t} />
+                <FilterSelect value={pendingExam}   onChange={setPendingExam}   options={["CIE1","CIE2","Internal1","Internal2","FULLRESULT"]} dark={dark} t={t} />
                 <button style={s.applyBtn} onClick={applyFilters}>Apply</button>
               </div>
               <div style={s.chartBox}>

@@ -7,53 +7,75 @@ function Students() {
   // ✅ Updated: Empty initial state
   const [students, setStudents] = useState([]);
 
-  const [formData, setFormData] = useState({
-    enroll: "",
-    name: "",
-    course: "",
-    semester: ""
-  });
-
   const [search, setSearch] = useState("");
+  const [uploadStatus, setUploadStatus] = useState("");
 
   // ✅ NEW: Fetch students from backend
   useEffect(() => {
     adminAPI.getUsers({ role: "student" }).then(setStudents);
   }, []);
 
-  // Handle form input change
-  const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
-  };
-
-  // ✅ Updated: Add student using API
-  const addStudent = async () => {
-
-    if (!formData.enroll || !formData.name) {
-      alert("Please fill all fields");
-      return;
-    }
-
-    await adminAPI.createUser({ ...formData, role: "student" });
-
-    const updated = await adminAPI.getUsers({ role: "student" });
-    setStudents(updated);
-
-    setFormData({
-      enroll: "",
-      name: "",
-      course: "",
-      semester: ""
-    });
-  };
-
   // ✅ Updated: Delete using API
   const deleteStudent = async (id) => {
     await adminAPI.deleteUser(id);
     setStudents(students.filter(s => s.id !== id));
+  };
+
+  // ✅ NEW: Handle file upload for bulk students
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const lines = reader.result.trim().split('\n');
+        if (lines.length === 0) {
+          setUploadStatus('❌ Empty file');
+          return;
+        }
+
+        // Parse CSV (first line is header)
+        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+        const enrollIdx = headers.indexOf('enroll');
+        const nameIdx = headers.indexOf('name');
+        const courseIdx = headers.indexOf('course');
+        const semesterIdx = headers.indexOf('semester');
+
+        if (enrollIdx === -1 || nameIdx === -1) {
+          setUploadStatus('❌ CSV must have enroll and name columns');
+          return;
+        }
+
+        const studentsList = [];
+        for (let i = 1; i < lines.length; i++) {
+          const cols = lines[i].split(',').map(c => c.trim());
+          if (cols[0]) {
+            studentsList.push({
+              enroll: cols[enrollIdx],
+              name: cols[nameIdx],
+              course: cols[courseIdx] || 'N/A',
+              semester: cols[semesterIdx] || '1',
+              role: 'student'
+            });
+          }
+        }
+
+        // Bulk upload
+        for (const student of studentsList) {
+          await adminAPI.createUser(student);
+        }
+
+        const updated = await adminAPI.getUsers({ role: "student" });
+        setStudents(updated);
+        setUploadStatus(`✔ ${studentsList.length} students uploaded successfully`);
+        setTimeout(() => setUploadStatus(''), 3000);
+      } catch (err) {
+        console.error('File upload error:', err);
+        setUploadStatus('❌ Error uploading file');
+      }
+    };
+    reader.readAsText(file);
   };
 
   // Search filter
@@ -67,43 +89,35 @@ function Students() {
 
       <h2>Manage Students</h2>
 
-      {/* Add Student Form */}
-      <div className="student-form">
-
+      {/* File Upload */}
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', alignItems: 'center' }}>
         <input
-          type="text"
-          name="enroll"
-          placeholder="Enrollment Number"
-          value={formData.enroll}
-          onChange={handleChange}
+          type="file"
+          accept=".csv"
+          onChange={handleFileUpload}
+          style={{ display: 'none' }}
+          id="student-file-input"
         />
-
-        <input
-          type="text"
-          name="name"
-          placeholder="Student Name"
-          value={formData.name}
-          onChange={handleChange}
-        />
-
-        <input
-          type="text"
-          name="course"
-          placeholder="Course"
-          value={formData.course}
-          onChange={handleChange}
-        />
-
-        <input
-          type="text"
-          name="semester"
-          placeholder="Semester"
-          value={formData.semester}
-          onChange={handleChange}
-        />
-
-        <button onClick={addStudent}>Add Student</button>
-
+        <label
+          htmlFor="student-file-input"
+          style={{
+            padding: '10px 20px',
+            background: '#3b82f6',
+            color: '#fff',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: '600',
+            fontSize: '14px',
+            border: 'none'
+          }}
+        >
+          📁 Choose File
+        </label>
+        {uploadStatus && (
+          <span style={{ fontSize: '14px', fontWeight: '500' }}>
+            {uploadStatus}
+          </span>
+        )}
       </div>
 
       {/* Search Bar */}

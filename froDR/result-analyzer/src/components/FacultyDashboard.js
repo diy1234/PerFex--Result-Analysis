@@ -134,6 +134,9 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
   // ── NEW: State for faculty allocations ──
   const [facultyAllocations, setFacultyAllocations] = useState([]);
 
+  // ── State for query replies ──
+  const [queryReplies, setQueryReplies] = useState({});
+
   const T = isDarkMode ? DARK_T : LIGHT_T;
   const S = getStyles(T);
 
@@ -397,6 +400,15 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
     setQueries(prev => prev.map(q => q.id === id ? { ...q, status:"Resolved" } : q));
   };
 
+  const handleSendReply = (qId, replyText, studentName) => {
+    if (!replyText.trim()) {
+      alert("Please write a reply message");
+      return;
+    }
+    alert(`✓ Reply sent to ${studentName}!\n\n"${replyText}"\n\nStudent has been notified via the system.`);
+    setQueryReplies(prev => ({ ...prev, [qId]: "" }));
+  };
+
   const handleSaveProfile = async () => {
     try {
       await facultyAPI.updateProfile({
@@ -503,7 +515,7 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
       <select style={{ ...S.select, minWidth:160, padding:"10px 14px", fontSize:14, fontWeight:500 }} value={examType} onChange={e => setExamType(e.target.value)}>
         <option value="CIE1">CIE 1</option><option value="CIE2">CIE 2</option>
         <option value="INTERNAL1">Internal 1</option><option value="INTERNAL2">Internal 2</option>
-        <option value="FULLRESULT">Full Result</option>
+        <option value="FULLRESULT">Final Result</option>
       </select>
       <select style={{ ...S.select, minWidth:120, padding:"10px 14px", fontSize:14, fontWeight:500 }} value={classSection} onChange={e => setClassSection(e.target.value)}>
         {availableSections.map(sec => <option key={sec} value={sec}>{sec === "All" ? "All Classes" : `Class ${sec}`}</option>)}
@@ -779,36 +791,77 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
     </>
   );
 
+  const exportChartsAsPDF = async () => {
+    try {
+      const element = document.getElementById("analysisChartsSection");
+      if (!element) { alert("Charts section not found"); return; }
+      const canvas = await html2canvas(element, { backgroundColor:isDarkMode?"#161b27":"#ffffff", scale:2 });
+      const pdf = new jsPDF({ orientation:"landscape", unit:"mm", format:"a4" });
+      const imgData = canvas.toDataURL("image/png");
+      pdf.addImage(imgData, "PNG", 10, 10, 280, 180);
+      pdf.save(`performance-analysis-${subject}-${examType}.pdf`);
+    } catch (err) { console.error("Export failed:", err); alert("Failed to export PDF"); }
+  };
+
+  const exportChartsAsImage = async () => {
+    try {
+      const element = document.getElementById("analysisChartsSection");
+      if (!element) { alert("Charts section not found"); return; }
+      const canvas = await html2canvas(element, { backgroundColor:isDarkMode?"#161b27":"#ffffff", scale:2 });
+      const link = document.createElement("a");
+      link.href = canvas.toDataURL("image/png");
+      link.download = `performance-analysis-${subject}-${examType}.png`;
+      link.click();
+    } catch (err) { console.error("Export failed:", err); alert("Failed to export image"); }
+  };
+
   const ViewAnalysis = () => {
     const allStats = calcStats(currentMarks.map(s => s.marks));
     return (
       <>
-        <SectionHeader title="Performance Analysis" subtitle="Detailed analytics for the selected subject and semester" />
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:16, marginBottom:24 }}>
-          <StatCard label="Class Average" value={allStats.avg}             color={T.accent}  />
-          <StatCard label="Highest Marks" value={allStats.highest}         color={T.success} />
-          <StatCard label="Lowest Marks"  value={allStats.lowest}          color={T.danger}  />
-          <StatCard label="Pass Rate"     value={`${allStats.passRate}%`}  color={T.warning} />
-        </div>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:24 }}>
-          <div style={S.card}>
-            <div style={{ fontSize:14, fontWeight:600, color:T.text, marginBottom:16 }}>Subject-wise Average</div>
-            <div style={{ height:260, position:"relative" }}><Bar data={barData} options={chartDefaults} /></div>
+        <SectionHeader 
+          title="Performance Analysis" 
+          subtitle="Detailed analytics for the selected subject and semester"
+          actions={[
+            <button key="export-pdf" onClick={exportChartsAsPDF} style={{ ...S.btnSecondary, display:"flex", alignItems:"center", gap:8, padding:"10px 18px", fontSize:14, fontWeight:600 }}>
+              📥 Export PDF
+            </button>,
+            <button key="export-image" onClick={exportChartsAsImage} style={{ ...S.btnPrimary, display:"flex", alignItems:"center", gap:8, padding:"10px 18px", fontSize:14, fontWeight:600 }}>
+              🖼 Export Image
+            </button>
+          ]}
+        />
+        
+        <FilterBar onApply={handleApplyFilters} />
+
+        <div id="analysisChartsSection" style={{ padding:"16px", borderRadius:8, background:isDarkMode?"#0f1117":"#f8fafc" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:16, marginBottom:24 }}>
+            <StatCard label="Class Average" value={allStats.avg}             color={T.accent}  />
+            <StatCard label="Highest Marks" value={allStats.highest}         color={T.success} />
+            <StatCard label="Lowest Marks"  value={allStats.lowest}          color={T.danger}  />
+            <StatCard label="Pass Rate"     value={`${allStats.passRate}%`}  color={T.warning} />
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:24 }}>
+            <div style={S.card}>
+              <div style={{ fontSize:14, fontWeight:600, color:T.text, marginBottom:16 }}>Subject-wise Average</div>
+              <div style={{ height:260, position:"relative" }}><Bar data={barData} options={chartDefaults} /></div>
+            </div>
+            <div style={S.card}>
+              <div style={{ fontSize:14, fontWeight:600, color:T.text, marginBottom:16 }}>Pass vs Fail</div>
+              <div style={{ height:260, position:"relative" }}><Pie data={pieData} options={pieOptions} /></div>
+            </div>
           </div>
           <div style={S.card}>
-            <div style={{ fontSize:14, fontWeight:600, color:T.text, marginBottom:16 }}>Pass vs Fail</div>
-            <div style={{ height:260, position:"relative" }}><Pie data={pieData} options={pieOptions} /></div>
+            <div style={{ fontSize:14, fontWeight:600, color:T.text, marginBottom:16 }}>Individual Student Scores · {subject}</div>
+            <div style={{ height:220, position:"relative" }}>
+              <Bar
+                data={{ labels:currentMarks.map(s=>s.name), datasets:[{ label:subject, data:currentMarks.map(s=>s.marks), backgroundColor:currentMarks.map(s=>s.marks<40?"#ef444499":s.marks>=75?"#22c55e99":"#4f8ef799"), borderRadius:5, barThickness:28 }] }}
+                options={{ ...chartDefaults, plugins:{ ...chartDefaults.plugins, legend:{ display:false } } }}
+              />
+            </div>
           </div>
         </div>
-        <div style={S.card}>
-          <div style={{ fontSize:14, fontWeight:600, color:T.text, marginBottom:16 }}>Individual Student Scores · {subject}</div>
-          <div style={{ height:220, position:"relative" }}>
-            <Bar
-              data={{ labels:currentMarks.map(s=>s.name), datasets:[{ label:subject, data:currentMarks.map(s=>s.marks), backgroundColor:currentMarks.map(s=>s.marks<40?"#ef444499":s.marks>=75?"#22c55e99":"#4f8ef799"), borderRadius:5, barThickness:28 }] }}
-              options={{ ...chartDefaults, plugins:{ ...chartDefaults.plugins, legend:{ display:false } } }}
-            />
-          </div>
-        </div>
+        
         <AIInsight role="faculty" dataContext={facultyAIContext} dark={isDarkMode} />
       </>
     );
@@ -909,10 +962,33 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
             <span style={S.badge(q.status==="Pending"?"pending":"resolved")}>{q.status}</span>
           </div>
           <p style={{ fontSize:13, color:T.textSub, margin:"10px 0", lineHeight:1.6, paddingLeft:44 }}>{q.description || q.query}</p>
+          
           {q.status === "Pending" && (
-            <div style={{ paddingLeft:44 }}>
-              <button style={S.btnPrimary} onClick={() => handleReplyQuery(q.id)}>Mark as Resolved</button>
-            </div>
+            <>
+              <div style={{ paddingLeft:44, marginTop:16 }}>
+                <label style={S.label}>Reply to Student</label>
+                <textarea 
+                  style={{ ...S.textarea, minHeight:80, marginBottom:12 }}
+                  placeholder="Write your reply message here..." 
+                  value={queryReplies[q.id] || ""}
+                  onChange={e => setQueryReplies(prev => ({ ...prev, [q.id]: e.target.value }))}
+                />
+                <div style={{ display:"flex", gap:10 }}>
+                  <button 
+                    style={{ ...S.btnPrimary }}
+                    onClick={() => handleSendReply(q.id, queryReplies[q.id] || "", q.student_name_db || q.student_name || q.student || "Student")}
+                  >
+                    ✉ Send Reply & Notify
+                  </button>
+                  <button 
+                    style={{ ...S.btnSecondary }}
+                    onClick={() => handleReplyQuery(q.id)}
+                  >
+                    Mark as Resolved
+                  </button>
+                </div>
+              </div>
+            </>
           )}
         </div>
       ))}

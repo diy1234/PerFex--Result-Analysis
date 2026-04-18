@@ -9,17 +9,18 @@ import UploadResults from "./UploadResults";
 import RankList from "./Ranklist";
 import AdminProfile from "./AdminProfile";
 import Reports from "./Reports";
+import AIInsight from "./AIInsight";
 
 import { Bar, Pie } from "react-chartjs-2";
 
 import {
-Chart as ChartJS,
-CategoryScale,
-LinearScale,
-BarElement,
-ArcElement,
-Tooltip,
-Legend
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  ArcElement,
+  Tooltip,
+  Legend
 } from "chart.js";
 
 const ADMIN_PROFILE_KEY = "adminProfile";
@@ -28,566 +29,521 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Le
 
 function AdminDashboard({ setDashboard, setPage, page }) {
 
-/* COURSE + SESSION FILTER */
+  /* ── Filters ─────────────────────────────────────────────────────── */
+  // Pending filters (what user is selecting)
+  const [pendingCourse,    setPendingCourse]    = useState("MCA");
+  const [pendingSession,   setPendingSession]   = useState("2024-25");
+  const [pendingSemester,  setPendingSemester]  = useState("1");
+  const [pendingExamType,  setPendingExamType]  = useState("CIE1");
+  
+  // Applied filters (what's actually loaded)
+  const [course,    setCourse]    = useState("MCA");
+  const [session,   setSession]   = useState("2024-25");
+  const [semester,  setSemester]  = useState("1");
+  const [examType,  setExamType]  = useState("CIE1");
+  
+  const [darkMode,  setDarkMode]  = useState(true);
 
-const [course,setCourse] = useState("MCA");
-const [session,setSession] = useState("2024-25");
-const [darkMode, setDarkMode] = useState(true);
+  /* ── Profile ─────────────────────────────────────────────────────── */
+  const [profile, setProfile] = useState({ name:"Admin", profileImage:"" });
 
-const [profile, setProfile] = useState({
-  name: "Admin",
-  profileImage: "",
-});
+  /* ── Backend data ────────────────────────────────────────────────── */
+  const [stats,      setStats]      = useState(null);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [analytics,  setAnalytics]  = useState([]);
+  const [fetchError, setFetchError] = useState(null);
 
-const [stats, setStats] = useState(null);
-const [leaderboard, setLeaderboard] = useState([]);
-const [analytics, setAnalytics] = useState([]);
-const [fetchError, setFetchError] = useState(null);
+  /* ── Announcements ───────────────────────────────────────────────── */
+  const [announcements,    setAnnouncements]    = useState([]);
+  const [announcementFile, setAnnouncementFile] = useState(null);
+  const [newAnnouncement,  setNewAnnouncement]  = useState({
+    title:"", message:"", course:"MCA", semester:"1", subject:"DBMS", class:"All",
+  });
 
-// Handle image upload for admin profile
-const handleImageUpload = (e) => {
-  const file = e.target.files[0];
-  if (file) {
+  /* ── Image upload ────────────────────────────────────────────────── */
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
     const reader = new FileReader();
     reader.onload = (event) => {
-      const updatedProfile = { ...profile, profileImage: event.target.result };
-      setProfile(updatedProfile);
-      localStorage.setItem(ADMIN_PROFILE_KEY, JSON.stringify(updatedProfile));
-      window.dispatchEvent(new CustomEvent('adminProfileUpdated', { detail: updatedProfile }));
+      const updated = { ...profile, profileImage: event.target.result };
+      setProfile(updated);
+      localStorage.setItem(ADMIN_PROFILE_KEY, JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('adminProfileUpdated', { detail: updated }));
     };
     reader.readAsDataURL(file);
-  }
-};
+  };
 
-/* ANNOUNCEMENTS */
-
-const [newAnnouncement, setNewAnnouncement] = useState({
-  title: "",
-  message: "",
-  course: "MCA",
-  semester: "1",
-  subject: "DBMS",
-  class: "All",
-});
-const [announcementFile, setAnnouncementFile] = useState(null);
-const [announcements,setAnnouncements] = useState([]);
-
-/* FETCH DATA */
-
-const loadDashboardData = async () => {
-  try {
-    const statsRes = await adminAPI.getStats({ course });
-    setStats(statsRes);
-
-    const leaderboardRes = await adminAPI.getLeaderboard({ course });
-    setLeaderboard(leaderboardRes || []);
-
-    const analyticsRes = await adminAPI.getAnalytics({ course });
-    setAnalytics(analyticsRes || []);
-
-    const annRes = await adminAPI.getAnnouncements();
-    setAnnouncements(annRes || []);
-
-    setFetchError(null);
-  } catch (err) {
-    console.error('AdminDashboard fetch error', err);
-    setFetchError(err.message || 'Failed to load admin data');
-  }
-};
-
-useEffect(() => {
-  loadDashboardData();
-}, [course]);
-
-/* CHART DATA */
-
-const passCount = (leaderboard || []).filter((student) => Number(student.marks) >= 40).length;
-const totalCount = (leaderboard || []).length;
-const failCount = Math.max(0, totalCount - passCount);
-const passPercentageComputed = totalCount > 0 ? Math.round((passCount / totalCount) * 100) : 0;
-
-const passFailData = {
-  labels: ["Pass","Fail"],
-  datasets: [{
-    data: [passCount, failCount],
-    backgroundColor: ["#2ecc71","#e74c3c"]
-  }]
-};
-
-const subjectData = {
-  labels: analytics.map(a => a.name),
-  datasets: [{
-    label: "Average Marks",
-    data: analytics.map(a => a.avg_marks),
-    backgroundColor: "#3498db"
-  }]
-};
-
-/* PROFILE EVENT */
-
-useEffect(()=>{
-  const handler=()=>{ if(setPage) setPage("profile") }
-  window.addEventListener("openProfile",handler)
-  return()=>window.removeEventListener("openProfile",handler)
-},[setPage])
-
-/* LOAD PROFILE (for sidebar + navbar) */
-useEffect(() => {
-  const load = () => {
+  /* ── Load dashboard data ─────────────────────────────────────────── */
+  const loadDashboardData = async () => {
     try {
+      const [statsRes, leaderboardRes, analyticsRes, annRes] = await Promise.all([
+        adminAPI.getStats({ course }),
+        adminAPI.getLeaderboard({ course }),
+        adminAPI.getAnalytics({ course }),
+        adminAPI.getAnnouncements(),
+      ]);
+      setStats(statsRes);
+      setLeaderboard(leaderboardRes || []);
+      setAnalytics(analyticsRes || []);
+      setAnnouncements(annRes || []);
+      setFetchError(null);
+    } catch (err) {
+      console.error('AdminDashboard fetch error', err);
+      setFetchError(err.message || 'Failed to load admin data');
+    }
+  };
+
+  const handleApplyFilters = () => {
+    setCourse(pendingCourse);
+    setSession(pendingSession);
+    setSemester(pendingSemester);
+    setExamType(pendingExamType);
+  };
+
+  useEffect(() => { loadDashboardData(); }, [course]); // eslint-disable-line
+
+  /* ── Profile listeners ───────────────────────────────────────────── */
+  useEffect(() => {
+    const handler = () => { if (setPage) setPage("profile"); };
+    window.addEventListener("openProfile", handler);
+    return () => window.removeEventListener("openProfile", handler);
+  }, [setPage]);
+
+  useEffect(() => {
+    const load = () => {
+      try {
         const stored = JSON.parse(localStorage.getItem(ADMIN_PROFILE_KEY));
-        if (stored && typeof stored === "object") {
-          setProfile((prev) => ({ ...prev, ...stored }));
-        }
-      } catch (e) {
-        // ignore
-      }
+        if (stored && typeof stored === "object") setProfile(prev => ({ ...prev, ...stored }));
+      } catch {}
     };
     load();
-
-    const onUpdate = (e) => {
-      if (e && e.detail) {
-        setProfile((prev) => ({ ...prev, ...e.detail }));
-      } else {
-        load();
-      }
-    };
-
+    const onUpdate = (e) => { if (e?.detail) setProfile(prev => ({ ...prev, ...e.detail })); else load(); };
     window.addEventListener("adminProfileUpdated", onUpdate);
     window.addEventListener("storage", load);
-    return () => {
-      window.removeEventListener("adminProfileUpdated", onUpdate);
-      window.removeEventListener("storage", load);
-    };
+    return () => { window.removeEventListener("adminProfileUpdated", onUpdate); window.removeEventListener("storage", load); };
   }, []);
 
-useEffect(() => {
-  document.body.className = darkMode ? "admin-dark-body sd-dark-body" : "admin-light-body sd-light-body";
-  return () => { document.body.className = ""; };
-}, [darkMode]);
+  useEffect(() => {
+    document.body.className = darkMode ? "admin-dark-body sd-dark-body" : "admin-light-body sd-light-body";
+    return () => { document.body.className = ""; };
+  }, [darkMode]);
 
-/* LOGOUT */
+  /* ── Derived chart data ──────────────────────────────────────────── */
+  const passCount   = (leaderboard || []).filter(s => Number(s.marks) >= 40).length;
+  const totalCount  = (leaderboard || []).length;
+  const failCount   = Math.max(0, totalCount - passCount);
+  const passPercent = totalCount > 0 ? Math.round((passCount / totalCount) * 100) : 0;
 
-const logout=()=>{
-setDashboard(null)
-setPage("dashboard")
-}
+  const passFailData = {
+    labels: ["Pass", "Fail"],
+    datasets: [{ data:[passCount, failCount], backgroundColor:["#22c55e","#ef4444"] }],
+  };
+  const subjectData = {
+    labels: analytics.map(a => a.name),
+    datasets: [{ label:"Average Marks", data:analytics.map(a => a.avg_marks), backgroundColor:"#4f8ef7", borderRadius:6 }],
+  };
 
-/* ANNOUNCEMENT POST */
+  /* ── AI context ──────────────────────────────────────────────────── */
+  const adminAIContext = [
+    `Admin view: Course=${course} | Session=${session} | Semester=${semester} | Exam=${examType}`,
+    `Total students: ${stats?.total_students || 0} | Total teachers: ${stats?.total_teachers || 0}`,
+    `Results uploaded: ${stats?.marks_entered || 0} | Pass percentage: ${passPercent}%`,
+    `Pass count: ${passCount} | Fail count: ${failCount} | Total in leaderboard: ${totalCount}`,
+    `Subject analytics: ${analytics.map(a => a.name+'='+a.avg_marks).join(', ') || 'No data'}`,
+    `Top 3 students: ${(leaderboard || []).slice(0,3).map(s => s.name+'('+s.marks+')').join(', ') || 'No data'}`,
+  ].join('\n');
 
-const postAnnouncement = () => {
-  if (!newAnnouncement.message) return;
+  /* ── Actions ─────────────────────────────────────────────────────── */
+  const logout = () => { setDashboard(null); setPage("dashboard"); };
 
-  adminAPI.postAnnouncement(newAnnouncement)
-    .then(() => adminAPI.getAnnouncements())
-    .then(res => {
-      setAnnouncements(res || []);
-      setNewAnnouncement({
-        title: "",
-        message: "",
-        course: "MCA",
-        semester: "1",
-        subject: "DBMS",
-        class: "All",
-      });
-      setAnnouncementFile(null);
-    })
-    .catch(err => console.log(err));
-};
+  const postAnnouncement = () => {
+    if (!newAnnouncement.message) return;
+    adminAPI.postAnnouncement(newAnnouncement)
+      .then(() => adminAPI.getAnnouncements())
+      .then(res => {
+        setAnnouncements(res || []);
+        setNewAnnouncement({ title:"", message:"", course:"MCA", semester:"1", subject:"DBMS", class:"All" });
+        setAnnouncementFile(null);
+      })
+      .catch(err => console.log(err));
+  };
 
-/* SIDEBAR MENU */
+  /* ── Menu ────────────────────────────────────────────────────────── */
+  const menuItems = [
+    { key:"profile",      label:"Admin Profile",   icon:"◎" },
+    { key:"dashboard",    label:"Dashboard",        icon:"▦" },
+    { key:"students",     label:"Manage Students",  icon:"👤" },
+    { key:"teachers",     label:"Manage Teachers",  icon:"🎓" },
+    { key:"upload",       label:"Upload Results",   icon:"⬆" },
+    { key:"leaderboard",  label:"Leaderboard",      icon:"🏆" },
+    { key:"announcements",label:"Announcements",    icon:"✉" },
+    { key:"reports",      label:"Reports",          icon:"📊" },
+  ];
 
-const menuItems=[
-  { key:"profile",label:"Admin Profile" },
-  { key:"dashboard",label:"Dashboard" },
-  { key:"students",label:"Manage Students" },
-  { key:"teachers",label:"Manage Teachers" },
-  { key:"upload",label:"Upload Results" },
-  { key:"leaderboard",label:"Leaderboard" },
-  { key:"announcements",label:"Announcements" },
-  { key:"reports",label:"Reports" }
-]
+  const isActive = (key) => page === key;
 
-const isActive=(key)=>page===key
+  /* ── T tokens (dark/light) ───────────────────────────────────────── */
+  const T = darkMode
+    ? { bg:"#0f172a", surface:"#111827", card:"#1e293b", border:"#334155", text:"#e2e8f0", textSub:"#94a3b8", accent:"#4f8ef7", success:"#22c55e", danger:"#ef4444", warning:"#f59e0b" }
+    : { bg:"#f8fafc",  surface:"#ffffff", card:"#ffffff", border:"#e2e8f0", text:"#1e293b", textSub:"#64748b", accent:"#2563eb", success:"#16a34a", danger:"#dc2626", warning:"#ea580c" };
 
-/* PAGE RENDER */
-
-const renderContent=()=>{
-
-let filteredData = [];
-
-switch(page){
-
-case "students":
-return(
-<div>
-<div className="page-header">
-<h2>Manage Students</h2>
-<div className="subtitle">Add or remove student records</div>
-</div>
-<Students/>
-</div>
-)
-
-case "teachers":
-return(
-<div>
-<div className="page-header">
-<h2>Manage Teachers</h2>
-<div className="subtitle">View and update teacher profiles</div>
-</div>
-<Teacher/>
-</div>
-)
-
-case "upload":
-return(
-<div>
-<div className="page-header">
-<h2>Upload Results</h2>
-<div className="subtitle">Upload CSV exam results</div>
-</div>
-<UploadResults onUploadSuccess={loadDashboardData} />
-</div>
-)
-
-case "leaderboard": {
-  return (
-    <div>
-      <div className="page-header">
-        <h2>Leaderboard</h2>
+  /* ── Filter bar component ────────────────────────────────────────── */
+  const DashFilterBar = () => (
+    <div style={{ display:"flex", gap:12, marginBottom:28, flexWrap:"wrap", alignItems:"center" }}>
+      {/* Course */}
+      <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+        <label style={{ fontSize:10, fontWeight:700, color:T.textSub, textTransform:"uppercase", letterSpacing:"0.1em" }}>Course</label>
+        <select value={pendingCourse} onChange={e => setPendingCourse(e.target.value)} style={selStyle(T)}>
+          <option>MCA</option><option>BCA</option><option>BBA</option>
+        </select>
       </div>
+      {/* Session */}
+      <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+        <label style={{ fontSize:10, fontWeight:700, color:T.textSub, textTransform:"uppercase", letterSpacing:"0.1em" }}>Session</label>
+        <select value={pendingSession} onChange={e => setPendingSession(e.target.value)} style={selStyle(T)}>
+          <option>2024-25</option><option>2023-24</option><option>2022-23</option>
+        </select>
+      </div>
+      {/* Semester */}
+      <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+        <label style={{ fontSize:10, fontWeight:700, color:T.textSub, textTransform:"uppercase", letterSpacing:"0.1em" }}>Semester</label>
+        <select value={pendingSemester} onChange={e => setPendingSemester(e.target.value)} style={selStyle(T)}>
+          <option value="1">Semester 1</option>
+          <option value="2">Semester 2</option>
+          <option value="3">Semester 3</option>
+          <option value="4">Semester 4</option>
+        </select>
+      </div>
+      {/* Exam Type */}
+      <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+        <label style={{ fontSize:10, fontWeight:700, color:T.textSub, textTransform:"uppercase", letterSpacing:"0.1em" }}>Exam Type</label>
+        <select value={pendingExamType} onChange={e => setPendingExamType(e.target.value)} style={selStyle(T)}>
+          <option value="Internal1">Internal 1</option>
+          <option value="Internal2">Internal 2</option>
+          <option value="CIE1">CIE 1</option>
+          <option value="CIE2">CIE 2</option>
+          <option value="CIE3">CIE 3</option>
+          <option value="FULLRESULT">Final Result</option>
+        </select>
+      </div>
+      {/* Apply Button */}
+      <button
+        onClick={handleApplyFilters}
+        style={{
+          marginTop: 20,
+          padding: "8px 24px",
+          background: T.accent,
+          color: "#fff",
+          border: "none",
+          borderRadius: 8,
+          fontSize: 13,
+          fontWeight: 600,
+          cursor: "pointer",
+          transition: "all 0.2s",
+          boxShadow: `0 2px 8px ${T.accent}40`
+        }}
+        onMouseEnter={e => { e.target.style.transform = "translateY(-2px)"; e.target.style.boxShadow = `0 4px 12px ${T.accent}60`; }}
+        onMouseLeave={e => { e.target.style.transform = "translateY(0)"; e.target.style.boxShadow = `0 2px 8px ${T.accent}40`; }}
+      >
+        Apply
+      </button>
+      {/* Applied badge */}
+      <div style={{ marginTop:20, fontSize:12, color:T.success, fontWeight:600, background: darkMode?"#14532d22":"#dcfce7", padding:"8px 14px", borderRadius:8, border:`1px solid ${T.success}40` }}>
+        ✓ {course} · Sem {semester} · {examType}
+      </div>
+    </div>
+  );
 
-      <RankList data={leaderboard} />
+  /* ── Stat card ───────────────────────────────────────────────────── */
+  const StatCard = ({ label, value, accent, sub, onClick }) => (
+    <div onClick={onClick}
+      style={{ background:T.card, border:`1px solid ${T.border}`, borderTop:`3px solid ${accent}`, borderRadius:12, padding:"20px 24px", cursor:onClick?"pointer":"default", transition:"all 0.2s" }}
+      onMouseEnter={e => { if(onClick) e.currentTarget.style.transform="translateY(-3px)"; }}
+      onMouseLeave={e => { e.currentTarget.style.transform="translateY(0)"; }}>
+      <div style={{ fontSize:11, fontWeight:700, color:T.textSub, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:10 }}>{label}</div>
+      <div style={{ fontSize:32, fontWeight:800, color:T.text, lineHeight:1 }}>{value}</div>
+      {sub && <div style={{ fontSize:12, color:T.textSub, marginTop:6 }}>{sub}</div>}
+    </div>
+  );
+
+  /* ── Page content ────────────────────────────────────────────────── */
+  const renderContent = () => {
+    switch(page) {
+
+      case "students":
+        return (
+          <div>
+            <div className="page-header"><h2 style={{ color:T.text }}>Manage Students</h2><div className="subtitle">Add or remove student records</div></div>
+            <Students />
+          </div>
+        );
+
+      case "teachers":
+        return (
+          <div>
+            <div className="page-header"><h2 style={{ color:T.text }}>Manage Teachers</h2><div className="subtitle">View and update teacher profiles</div></div>
+            <Teacher />
+          </div>
+        );
+
+      case "upload":
+        return (
+          <div>
+            <div className="page-header"><h2 style={{ color:T.text }}>Upload Results</h2><div className="subtitle">Upload CSV exam results</div></div>
+            <UploadResults onUploadSuccess={loadDashboardData} />
+          </div>
+        );
+
+      case "leaderboard":
+        return (
+          <div>
+            <div className="page-header"><h2 style={{ color:T.text }}>Leaderboard</h2></div>
+            <RankList data={leaderboard} />
+          </div>
+        );
+
+      case "announcements":
+        return (
+          <>
+            <div className="page-header">
+              <h2 style={{ color:T.text }}>Announcements</h2>
+              <div className="subtitle">Post updates and notices to students</div>
+            </div>
+            <div className="admin-announcement-page">
+              <div className="admin-announcement-card glass-card">
+                <div className="admin-announcement-card-header">
+                  <div><h3>Post New Announcement</h3><p>Share announcements by course, semester, subject and class.</p></div>
+                </div>
+                <div className="admin-announcement-grid">
+                  {[
+                    { label:"Course",   field:"course",   opts:["MCA","BCA"] },
+                    { label:"Semester", field:"semester", opts:["1","2","3","4"] },
+                    { label:"Subject",  field:"subject",  opts:["DBMS","OS","DS","Algo"] },
+                    { label:"Class",    field:"class",    opts:["A","B","C","All"] },
+                  ].map(({ label, field, opts }) => (
+                    <div className="admin-announcement-field" key={field}>
+                      <label>{label}</label>
+                      <select value={newAnnouncement[field]} onChange={e => setNewAnnouncement({ ...newAnnouncement, [field]:e.target.value })}>
+                        {opts.map(o => <option key={o}>{o}</option>)}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+                <div className="admin-announcement-row">
+                  <label>Title</label>
+                  <input type="text" placeholder="Announcement title" value={newAnnouncement.title} onChange={e => setNewAnnouncement({ ...newAnnouncement, title:e.target.value })} />
+                </div>
+                <div className="admin-announcement-row">
+                  <label>Message</label>
+                  <textarea placeholder="Write your message..." value={newAnnouncement.message} onChange={e => setNewAnnouncement({ ...newAnnouncement, message:e.target.value })} />
+                </div>
+                <div className="admin-announcement-row">
+                  <label>Attachment (Optional)</label>
+                  <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+                    <input type="file" id="adminAnnouncementFileInput" style={{ display:"none" }} onChange={e => setAnnouncementFile(e.target.files?.[0] || null)} />
+                    <button type="button" className="admin-announcement-file-btn" onClick={() => document.getElementById('adminAnnouncementFileInput').click()}>📎 Add File</button>
+                    {announcementFile && (
+                      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 12px", backgroundColor:"rgba(79,142,247,0.15)", borderRadius:8, flex:1 }}>
+                        <span style={{ fontSize:12 }}>📄</span>
+                        <span style={{ fontSize:12, color:"#e2e8f0" }}>{announcementFile.name}</span>
+                        <button type="button" style={{ marginLeft:"auto", background:"transparent", border:"none", color:"#4f8ef7", cursor:"pointer", fontSize:14 }} onClick={() => setAnnouncementFile(null)}>✕</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <button className="admin-announcement-submit" onClick={postAnnouncement}>Post Announcement</button>
+              </div>
+
+              <div className="admin-announcement-list">
+                {announcements.length === 0 ? (
+                  <div className="admin-announcement-empty glass-card"><p>No announcements yet. Create your first notice.</p></div>
+                ) : (announcements || []).map(ann => (
+                  <div key={ann.id} className="admin-announcement-item glass-card">
+                    <div className="admin-announcement-item-header">
+                      <h4>{ann.title}</h4>
+                      <span className="admin-announcement-date">{ann.date}</span>
+                    </div>
+                    <p>{ann.message}</p>
+                    <div className="admin-announcement-tags">
+                      {[ann.course, `Sem ${ann.semester}`, ann.subject, `Class ${ann.class}`].map((t,i) => (
+                        <span key={i} className="admin-announcement-pill">{t}</span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        );
+
+      case "reports":
+        return (
+          <div>
+            <div className="page-header"><h2 style={{ color:T.text }}>Reports</h2><div className="subtitle">Generate and view detailed reports</div></div>
+            <Reports data={leaderboard} analytics={analytics} />
+          </div>
+        );
+
+      case "profile":
+        return (
+          <div>
+            <div className="page-header"><h2 style={{ color:T.text }}>Admin Profile</h2></div>
+            <AdminProfile />
+          </div>
+        );
+
+      default:
+        return (
+          <>
+            {/* Header */}
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:28, flexWrap:"wrap", gap:12 }}>
+              <div>
+                <h2 style={{ margin:0, fontSize:28, fontWeight:800, color:T.text, letterSpacing:"-0.02em" }}>Admin Dashboard</h2>
+                <p style={{ margin:"6px 0 0", fontSize:14, color:T.textSub }}>Overview analytics for {course} · Session {session}</p>
+              </div>
+              {fetchError && (
+                <div style={{ fontSize:13, color:"#f87171", background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.25)", padding:"8px 14px", borderRadius:8 }}>
+                  ⚠ {fetchError}
+                </div>
+              )}
+            </div>
+
+            {/* Filter bar with new dropdowns */}
+            <DashFilterBar />
+
+            {/* Stat cards */}
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))", gap:16, marginBottom:28 }}>
+              <StatCard label="Total Students"   value={stats?.total_students || 0} accent={T.accent}   sub={`${course} · ${session}`}   onClick={() => setPage('students')} />
+              <StatCard label="Total Teachers"   value={stats?.total_teachers || 0} accent={T.success}  sub="Active faculty members"       onClick={() => setPage('teachers')} />
+              <StatCard label="Results Uploaded" value={stats?.marks_entered  || 0} accent={T.warning}  sub="Marks entered in DB"          onClick={() => setPage('upload')} />
+              <StatCard label="Pass Percentage"  value={`${passPercent}%`}           accent="#a855f7"   sub={`${passCount} passed · ${failCount} failed`} />
+            </div>
+
+            {/* Charts row */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20, marginBottom:28 }}>
+              {/* Pass vs Fail */}
+              <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"22px 24px" }}>
+                <div style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:4 }}>Pass vs Fail</div>
+                <div style={{ fontSize:12, color:T.textSub, marginBottom:16 }}>{course} · Sem {semester} · {examType}</div>
+                <div style={{ maxHeight:240, display:"flex", justifyContent:"center" }}>
+                  <Pie data={passFailData} options={{ plugins:{ legend:{ labels:{ color:T.textSub } } } }} />
+                </div>
+                <div style={{ display:"flex", justifyContent:"space-around", marginTop:14, fontSize:13 }}>
+                  <span style={{ color:T.success, fontWeight:600 }}>● Pass: {passCount} ({passPercent}%)</span>
+                  <span style={{ color:T.danger,  fontWeight:600 }}>● Fail: {failCount} ({100-passPercent}%)</span>
+                </div>
+              </div>
+
+              {/* Subject Performance */}
+              <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"22px 24px" }}>
+                <div style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:4 }}>Subject Performance</div>
+                <div style={{ fontSize:12, color:T.textSub, marginBottom:16 }}>Average marks by subject</div>
+                <div style={{ height:240 }}>
+                  <Bar data={subjectData} options={{
+                    maintainAspectRatio:false,
+                    plugins:{ legend:{ display:false } },
+                    scales:{
+                      x:{ grid:{ color: darkMode?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.06)" }, ticks:{ color:T.textSub } },
+                      y:{ grid:{ color: darkMode?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.06)" }, ticks:{ color:T.textSub } },
+                    },
+                  }} />
+                </div>
+              </div>
+            </div>
+
+            {/* AI Insight Panel */}
+            <AIInsight role="admin" dataContext={adminAIContext} dark={darkMode} />
+          </>
+        );
+    }
+  };
+
+  /* ── RENDER ──────────────────────────────────────────────────────── */
+  return (
+    <div className="dashboard" style={{ background:T.bg, minHeight:"100vh" }}>
+
+      <Navbar
+        title="Admin Dashboard"
+        logout={logout}
+        openProfile={() => setPage("profile")}
+        onLogoClick={() => setPage("dashboard")}
+        profileImage={profile.profileImage}
+      />
+
+      <div className="dashboard-container">
+
+        {/* ── Sidebar ─────────────────────────────────────────────── */}
+        <div className="sidebar">
+          <div className="profile-section" style={{ textAlign:'center', borderBottom:'1px solid rgba(255,255,255,0.1)', padding:'16px 16px 12px' }}>
+            <div style={{ marginBottom:12 }}>
+              {profile.profileImage ? (
+                <div style={{ width:80, height:80, display:'inline-block', borderRadius:'50%', background:'#fff', padding:2, boxShadow:'0 3px 8px rgba(0,0,0,0.2)' }}>
+                  <img src={profile.profileImage} alt="admin" style={{ width:76, height:76, borderRadius:'50%', objectFit:'cover', display:'block' }} />
+                </div>
+              ) : (
+                <div style={{ width:80, height:80, background:'linear-gradient(135deg,#3b82f6,#1d4ed8)', borderRadius:'50%', display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:28, fontWeight:800, color:'#fff', boxShadow:'0 4px 12px rgba(37,99,235,0.3)' }}>
+                  {(profile.name || 'A')[0].toUpperCase()}
+                </div>
+              )}
+              <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display:'none' }} id="admin-image-input" />
+              <label htmlFor="admin-image-input" style={{ display:'block', marginTop:8, fontSize:10, fontWeight:700, color:'#60a5fa', cursor:'pointer', background:'rgba(96,165,250,0.15)', padding:'4px 8px', borderRadius:6, textAlign:'center', letterSpacing:'0.05em' }}>
+                Upload Photo
+              </label>
+            </div>
+            <h3 style={{ fontWeight:700, marginBottom:4, fontSize:15, color:'#f8fafc' }}>{profile.name || "Admin"}</h3>
+            <p style={{ fontSize:11, color:'#94a3b8', margin:0 }}>ADM-2024-01</p>
+          </div>
+
+          <ul className="menu">
+            {menuItems.map(item => (
+              <li key={item.key} className={`menu-item ${isActive(item.key)?"active":""}`} onClick={() => setPage(item.key)}>
+                <span className="icon" style={{ fontSize:14 }}>{item.icon}</span>
+                {item.label}
+              </li>
+            ))}
+            <li className="menu-item logout-item" onClick={logout}>
+              <span className="icon">⏻</span>Logout
+            </li>
+
+            {/* AI badge */}
+            <div style={{ margin:"12px 16px 16px", background:"#1e1b4b", border:"1px solid #312e81", borderRadius:10, padding:"10px 12px" }}>
+              <div style={{ fontSize:11, fontWeight:700, color:"#a78bfa", marginBottom:3 }}>✦ AI Insights Active</div>
+              <div style={{ fontSize:10, color:"#94a3b8", lineHeight:1.5 }}>Smart predictions & analysis enabled</div>
+            </div>
+          </ul>
+        </div>
+
+        {/* ── Main content ─────────────────────────────────────────── */}
+        <div className="main-content" style={{ background:T.surface, color:T.text }}>
+          <div className="page-action-bar">
+            <button className="theme-toggle" onClick={() => setDarkMode(p => !p)}>
+              {darkMode ? "☀ Light Mode" : "🌙 Dark Mode"}
+            </button>
+          </div>
+          {renderContent()}
+        </div>
+
+      </div>
     </div>
   );
 }
 
-case "announcements":
-return(
-  <>
-    <div className="page-header">
-      <h2>Announcements</h2>
-      <div className="subtitle">Post updates and notices to students</div>
-    </div>
-
-    <div className="admin-announcement-page">
-      <div className="admin-announcement-card glass-card">
-        <div className="admin-announcement-card-header">
-          <div>
-            <h3>Post New Announcement</h3>
-            <p>Share announcements by course, semester, subject and class.</p>
-          </div>
-        </div>
-
-        <div className="admin-announcement-grid">
-          <div className="admin-announcement-field">
-            <label>Course</label>
-            <select value={newAnnouncement.course} onChange={(e) => setNewAnnouncement({ ...newAnnouncement, course: e.target.value })}>
-              <option>MCA</option>
-              <option>BCA</option>
-            </select>
-          </div>
-          <div className="admin-announcement-field">
-            <label>Semester</label>
-            <select value={newAnnouncement.semester} onChange={(e) => setNewAnnouncement({ ...newAnnouncement, semester: e.target.value })}>
-              <option>1</option>
-              <option>2</option>
-              <option>3</option>
-              <option>4</option>
-            </select>
-          </div>
-          <div className="admin-announcement-field">
-            <label>Subject</label>
-            <select value={newAnnouncement.subject} onChange={(e) => setNewAnnouncement({ ...newAnnouncement, subject: e.target.value })}>
-              <option>DBMS</option>
-              <option>OS</option>
-              <option>DS</option>
-              <option>Algo</option>
-            </select>
-          </div>
-          <div className="admin-announcement-field">
-            <label>Class</label>
-            <select value={newAnnouncement.class} onChange={(e) => setNewAnnouncement({ ...newAnnouncement, class: e.target.value })}>
-              <option>A</option>
-              <option>B</option>
-              <option>C</option>
-              <option>All</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="admin-announcement-row">
-          <label>Title</label>
-          <input
-            type="text"
-            placeholder="Announcement title"
-            value={newAnnouncement.title}
-            onChange={(e) => setNewAnnouncement({ ...newAnnouncement, title: e.target.value })}
-          />
-        </div>
-
-        <div className="admin-announcement-row">
-          <label>Message</label>
-          <textarea
-            placeholder="Write your message..."
-            value={newAnnouncement.message}
-            onChange={(e) => setNewAnnouncement({ ...newAnnouncement, message: e.target.value })}
-          />
-        </div>
-
-        <div className="admin-announcement-row">
-          <label>Attachment (Optional)</label>
-          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-            <input
-              type="file"
-              id="adminAnnouncementFileInput"
-              style={{ display: "none" }}
-              onChange={(e) => setAnnouncementFile(e.target.files?.[0] || null)}
-            />
-            <button
-              type="button"
-              className="admin-announcement-file-btn"
-              onClick={() => document.getElementById('adminAnnouncementFileInput').click()}
-            >
-              📎 Add File
-            </button>
-            {announcementFile && (
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", backgroundColor: "rgba(79, 142, 247, 0.15)", borderRadius: "8px", flex: 1 }}>
-                <span style={{ fontSize: "12px" }}>📄</span>
-                <span style={{ fontSize: "12px", color: "#e2e8f0" }}>{announcementFile.name}</span>
-                <button
-                  type="button"
-                  style={{ marginLeft: "auto", background: "transparent", border: "none", color: "#4f8ef7", cursor: "pointer", fontSize: "14px" }}
-                  onClick={() => setAnnouncementFile(null)}
-                >
-                  ✕
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <button className="admin-announcement-submit" onClick={postAnnouncement}>
-          Post Announcement
-        </button>
-      </div>
-
-      <div className="admin-announcement-list">
-        {announcements.length === 0 ? (
-          <div className="admin-announcement-empty glass-card">
-            <p>No announcements yet. Create your first notice.</p>
-          </div>
-        ) : (
-          (announcements || []).map((ann) => (
-            <div key={ann.id} className="admin-announcement-item glass-card">
-              <div className="admin-announcement-item-header">
-                <h4>{ann.title}</h4>
-                <span className="admin-announcement-date">{ann.date}</span>
-              </div>
-              <p>{ann.message}</p>
-              <div className="admin-announcement-tags">
-                <span className="admin-announcement-pill">{ann.course}</span>
-                <span className="admin-announcement-pill">Sem {ann.semester}</span>
-                <span className="admin-announcement-pill">{ann.subject}</span>
-                <span className="admin-announcement-pill">Class {ann.class}</span>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  </>
-)
-
-case "reports":
-return(
-<div>
-<div className="page-header">
-<h2>Reports</h2>
-<div className="subtitle">Generate and view detailed reports</div>
-</div>
-<Reports data={leaderboard} analytics={analytics} />
-</div>
-)
-
-case "profile":
-return(
-<div>
-<div className="page-header">
-<h2>Admin Profile</h2>
-</div>
-<AdminProfile/>
-</div>
-)
-
-default:
-return(
-<>
-
-<div className="page-header">
-<h2>Admin Dashboard</h2>
-<div className="subtitle">
-Overview analytics for {course} ({session})
-</div>
-{fetchError && (
-  <div className="error-message" style={{ color: '#ff6b6b', marginTop: 10 }}>
-    {fetchError}
-  </div>
-)}
-</div>
-
-{/* FILTERS */}
-
-<div className="filters">
-
-<select value={course} onChange={(e)=>setCourse(e.target.value)}>
-<option>MCA</option>
-<option>BCA</option>
-<option>BBA</option>
-</select>
-
-<select value={session} onChange={(e)=>setSession(e.target.value)}>
-<option>2024-25</option>
-<option>2023-24</option>
-<option>2022-23</option>
-</select>
-
-</div>
-
-{/* CARDS */}
-
-<div className="cards">
-
-<div className="card blue clickable-card" onClick={() => setPage('students')} style={{cursor:'pointer'}}>
-<h3>Total Students</h3>
-<p>{stats?.total_students || 0}</p>
-</div>
-
-<div className="card green clickable-card" onClick={() => setPage('teachers')} style={{cursor:'pointer'}}>
-<h3>Total Teachers</h3>
-<p>{stats?.total_teachers || 0}</p>
-</div>
-
-<div className="card orange clickable-card" onClick={() => setPage('upload')} style={{cursor:'pointer'}}>
-<h3>Results Uploaded</h3>
-<p>{stats?.marks_entered || 0}</p>
-</div>
-
-<div className="card dark">
-<h3>Pass Percentage</h3>
-<p>{passPercentageComputed}%</p>
-</div>
-
-</div>
-
-{/* CHARTS */}
-
-<div className="charts">
-
-<div className="chart-box">
-<h3>Pass vs Fail</h3>
-<Pie data={passFailData}/>
-</div>
-
-<div className="chart-box">
-<h3>Subject Performance</h3>
-<Bar data={subjectData}/>
-</div>
-
-</div>
-
-</>
-
-)
-
+/* ── Helper: select style ────────────────────────────────────────────── */
+function selStyle(T) {
+  return {
+    padding:"9px 14px",
+    background: T.card,
+    border:`1px solid ${T.border}`,
+    borderRadius:8,
+    color: T.text,
+    fontSize:13,
+    fontWeight:500,
+    cursor:"pointer",
+    outline:"none",
+    minWidth:140,
+    fontFamily:"inherit",
+  };
 }
 
-}
-
-/* MAIN UI */
-
-return(
-
-<div className="dashboard">
-
-<Navbar
-title="Admin Dashboard"
-logout={logout}
-openProfile={()=>setPage("profile")}
-onLogoClick={()=>setPage("dashboard")}
-profileImage={profile.profileImage}
-/>
-
-<div className="dashboard-container">
-
-<div className="sidebar">
-
-
-<div className="profile-section" style={{textAlign:'center', borderBottom:'1px solid rgba(255,255,255,0.1)', marginBottom:'0', padding:'16px 16px 12px 16px'}}>
-  {/* Profile Image Section */}
-  <div style={{marginBottom:'12px', position:'relative'}}>
-    {profile.profileImage ? (
-      <div style={{width:85, height:85, display:'inline-block', borderRadius:'50%', background:'#fff', padding:3, boxShadow:'0 3px 6px rgba(0,0,0,0.15)'}}>
-        <img src={profile.profileImage} alt="admin" style={{width:79, height:79, borderRadius:'50%', objectFit:'cover', display:'block'}} />
-      </div>
-    ) : (
-      <div style={{width:85, height:85, background:'#fff', borderRadius:'50%', display:'inline-flex', alignItems:'center', justifyContent:'center', boxShadow:'0 3px 6px rgba(0,0,0,0.15)', marginBottom:'10px'}}>
-        <div style={{width:77, height:77, background:'#e0e0e0', borderRadius:'50%', display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:'11px', color:'#999', fontWeight:'bold'}}>Admin</div>
-      </div>
-    )}
-    {/* Upload Image Input */}
-    <input type="file" accept="image/*" onChange={handleImageUpload} style={{display:'none'}} id="admin-image-input" />
-    <label htmlFor="admin-image-input" style={{display:'block', marginTop:'8px', fontSize:'10px', fontWeight:'bold', color:'#1abcde', cursor:'pointer', backgroundColor:'rgba(26, 188, 222, 0.2)', padding:'5px 8px', borderRadius:'4px', textAlign:'center'}}>
-      Upload Photo
-    </label>
-  </div>
-  <h3 style={{fontWeight:700, marginBottom:'6px', fontSize:'16px'}}>{profile.name || "Admin"}</h3>
-  <p style={{fontSize:'12px', color:'#b0b0b0', margin:0}}>ADM-2024-01</p>
-</div>
-
-<ul className="menu">
-
-{menuItems.map(item=>(
-<li
-key={item.key}
-className={`menu-item ${isActive(item.key)?"active":""}`}
-onClick={()=>setPage(item.key)}
->
-<span className="icon">{item.icon}</span>
-{item.label}
-</li>
-))}
-
-<li className="menu-item logout-item" onClick={logout}>
-<span className="icon">⏻</span>
-Logout
-</li>
-
-        <div style={{ margin: "0 16px 16px", background: "#1e1b4b", border: "1px solid #312e81", borderRadius: 10, padding: "10px 12px" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "#a78bfa", marginBottom: 3 }}>✦ AI Insights Active</div>
-          <div style={{ fontSize: 10, color: "#94a3b8", lineHeight: 1.5 }}>Smart predictions & analysis enabled</div>
-        </div>
-
-</ul>
-
-</div>
-
-<div className="main-content">
-  <div className="page-action-bar">
-    <button className="theme-toggle" onClick={() => setDarkMode((prev) => !prev)}>
-      {darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
-    </button>
-  </div>
-  {renderContent()}
-</div>
-
-</div>
-
-</div>
-
-)
-
-}
-
-export default AdminDashboard
+export default AdminDashboard;

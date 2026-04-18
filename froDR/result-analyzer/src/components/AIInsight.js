@@ -53,38 +53,42 @@ function AIInsight({ role = "student", dataContext = "", dark = true }) {
     setAnswer("");
 
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      console.log("🔵 Calling AI Server at http://localhost:5001/api/ai");
+      
+      const res = await fetch("http://localhost:5001/api/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system: `You are an AI academic performance analyst for a college Result Analysis Dashboard (PREFEX Result Analyzer).
+          system: `You are an AI academic performance analyst for a college Result Analysis Dashboard (PERFEX Result Analyzer).
 The viewer role is: ${role}.
 Answer concisely in under 180 words. Use plain text only — no markdown, no bullet symbols, no asterisks.
 Always reference the data provided. Give specific, actionable recommendations.`,
-          messages: [
-            {
-              role: "user",
-              content: `Current data snapshot:\n${dataContext || "No data provided."}\n\nQuestion: ${q}`,
-            },
-          ],
+          userMessage: `Current data snapshot:\n${dataContext || "No data provided."}\n\nQuestion: ${q}`,
         }),
       });
 
+      console.log("📨 Response status:", res.status, res.statusText);
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        console.error("❌ Server error:", errorData);
+        setAnswer(`Error: ${errorData.details || errorData.error || 'Server returned ' + res.status}`);
+        return;
+      }
+
       const data = await res.json();
+      console.log("✅ AI Response:", data);
 
       if (data.error) {
-        setAnswer(`Error: ${data.error.message}`);
+        setAnswer(`Error: ${data.details || data.error}`);
+      } else if (data.reply) {
+        setAnswer(data.reply);
       } else {
-        const text = data.content
-          ?.filter((b) => b.type === "text")
-          .map((b) => b.text)
-          .join("\n") || "No response received.";
-        setAnswer(text);
+        setAnswer("No response received.");
       }
     } catch (err) {
-      setAnswer("Unable to connect to AI. Please check your internet connection.");
+      console.error("❌ Fetch Error:", err.message);
+      setAnswer(`Connection Error: ${err.message}\n\n⚠️ Make sure AI Server is running:\ncd backend/ai-server\nnpm start`);
     }
 
     setLoading(false);
@@ -158,7 +162,7 @@ Always reference the data provided. Give specific, actionable recommendations.`,
       <div style={header}>
         <span style={{ fontSize: 18 }}>✦</span>
         <span style={titleStyle}>AI Insight Engine</span>
-        <span style={badgeStyle}>Claude-powered</span>
+        <span style={badgeStyle}>Gemini-powered</span>
       </div>
 
       {/* Quick chips */}
