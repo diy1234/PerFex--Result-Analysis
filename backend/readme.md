@@ -10,6 +10,9 @@ python app.py
 | Admin   | admin@jims.edu     | Admin@123    |
 | Faculty | rajesh@jims.edu    | Faculty@123  |
 | Student | riya@jims.edu      | Student@123  |
+rajesh@jims.edu / Faculty@123
+meena@jims.edu / Faculty@123
+arjun@jims.edu / Faculty@123
 
 ## All API Endpoints
 
