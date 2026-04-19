@@ -78,9 +78,17 @@ function AdminDashboard({ setDashboard, setPage, page }) {
   const loadDashboardData = async () => {
     try {
       const [statsRes, leaderboardRes, analyticsRes, annRes] = await Promise.all([
-        adminAPI.getStats({ course }),
-        adminAPI.getLeaderboard({ course }),
-        adminAPI.getAnalytics({ course }),
+        adminAPI.getStats({
+        course,
+        semester,
+        exam_type: examType
+      }),
+        adminAPI.getLeaderboard({course,
+        semester,
+        exam_type: examType }),
+        adminAPI.getAnalytics({ course,
+        semester,
+        exam_type: examType }),
         adminAPI.getAnnouncements(),
       ]);
       setStats(statsRes);
@@ -153,6 +161,7 @@ function AdminDashboard({ setDashboard, setPage, page }) {
     `Subject analytics: ${analytics.map(a => a.name+'='+a.avg_marks).join(', ') || 'No data'}`,
     `Top 3 students: ${(leaderboard || []).slice(0,3).map(s => s.name+'('+s.marks+')').join(', ') || 'No data'}`,
   ].join('\n');
+
 
   /* ── Actions ─────────────────────────────────────────────────────── */
   const logout = () => { setDashboard(null); setPage("dashboard"); };

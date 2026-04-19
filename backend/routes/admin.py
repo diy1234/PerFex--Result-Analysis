@@ -18,7 +18,7 @@ def stats():
     
     # Build base query with optional course filter
     student_q = "SELECT COUNT(*) FROM users WHERE role='student'"
-    teacher_q = "SELECT COUNT(*) FROM users WHERE role='faculty'"
+    teacher_q = "SELECT COUNT(DISTINCT fa.faculty_id)FROM faculty_allocations fa WHERE 1=1"
     if course:
         student_q += f" AND course=?"
         teacher_q += f" AND course=?"
