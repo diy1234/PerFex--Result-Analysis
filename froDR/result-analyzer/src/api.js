@@ -252,6 +252,7 @@ export const facultyAPI = {
    */
   getQueries:    () => api('/faculty/queries'),
   resolveQuery:  (id) => api(`/faculty/queries/${id}/resolve`, { method: 'PUT' }),
+  replyQuery:    (id, replyMessage) => api(`/faculty/queries/${id}/reply`, { method: 'PUT', body: JSON.stringify({ reply_message: replyMessage }) }),
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════

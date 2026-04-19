@@ -767,6 +767,12 @@ function StudentDashboard({ setDashboard, setPage, announcements: initialAnnounc
                       </div>
                     </div>
                     <p style={{ fontSize:13, color:t.textSub, margin:0, lineHeight:1.6 }}>{c.query}</p>
+                    {c.reply_message && (
+                      <div style={{ marginTop:12, padding:12, borderRadius:10, background:dark?"rgba(34,197,94,0.12)":"rgba(34,197,94,0.12)", border:`1px solid ${dark?"rgba(34,197,94,0.25)":"rgba(34,197,94,0.25)"}` }}>
+                        <div style={{ fontSize:12, fontWeight:700, color:t.text }}>Faculty Reply</div>
+                        <div style={{ fontSize:13, color:t.textSub, marginTop:6, lineHeight:1.6 }}>{c.reply_message}</div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

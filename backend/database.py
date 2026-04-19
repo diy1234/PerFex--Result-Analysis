@@ -92,9 +92,15 @@ def init_db():
         exam_type      TEXT NOT NULL,
         marks_obtained TEXT,
         description    TEXT NOT NULL,
+        reply_message  TEXT,
         status         TEXT DEFAULT 'Pending',
         date           TEXT DEFAULT (date('now'))
     )''')
+
+    try:
+        c.execute("ALTER TABLE queries ADD COLUMN reply_message TEXT")
+    except:
+        pass
 
     # ── faculty_allocations ───────────────────────────────────────────────────
     # Each row = one teacher teaches one subject to one section in one semester.

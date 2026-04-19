@@ -460,7 +460,9 @@ def delete_announcement(ann_id):
 def get_queries():
     conn = get_db()
     rows = conn.execute("""
-        SELECT q.*, u.name AS student_name_db
+        SELECT q.id, q.student_id, q.subject, q.exam_type, q.marks_obtained,
+               q.description AS query, q.reply_message, q.status, q.date,
+               u.name AS student_name_db
         FROM queries q LEFT JOIN users u ON u.id=q.student_id
         ORDER BY q.date DESC
     """).fetchall()
@@ -477,4 +479,20 @@ def resolve_query(qid):
     conn.commit()
     conn.close()
     return jsonify({'message': 'Resolved'})
+
+
+# ── PUT /api/faculty/queries/<id>/reply ───────────────────────────────────────
+@faculty_bp.route('/queries/<int:qid>/reply', methods=['PUT'])
+@token_required
+def reply_query(qid):
+    data = request.get_json() or {}
+    reply = data.get('reply_message', '').strip()
+    if not reply:
+        return jsonify({'error': 'Reply message is required'}), 400
+
+    conn = get_db()
+    conn.execute("UPDATE queries SET status='Resolved', reply_message=? WHERE id=?", (reply, qid))
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Reply sent and student notified'})
 

@@ -254,7 +254,11 @@ def post_concern():
 def get_concerns():
     conn = get_db()
     rows = conn.execute("""
-        SELECT * FROM queries WHERE student_id=? ORDER BY date DESC
+        SELECT id, student_id, student_name, roll_no, subject, exam_type,
+               marks_obtained AS marksObtained, description AS query, reply_message, status, date
+        FROM queries
+        WHERE student_id=?
+        ORDER BY date DESC
     """, (request.user_id,)).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])

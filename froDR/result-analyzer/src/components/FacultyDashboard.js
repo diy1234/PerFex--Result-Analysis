@@ -406,7 +406,7 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
     if (isNaN(val) || val < 0 || val > 100) { alert("Enter valid marks (0-100)"); return; }
 
     const studentRow = allMarksData.find(s => s.id === studentId);
-    const subjectId  = studentRow && selectedSubjectKey ? studentRow[`${selectedSubjectKey}_subject_id`] : undefined;
+    const subjectId  = studentRow && selectedSubjectKey ? studentRow[`${selectedSubjectKey}_subject_id`] || selectedSubjectId : selectedSubjectId;
     if (!subjectId) { alert("Could not determine subject ID. Please re-load data."); return; }
 
     await facultyAPI.enterMarks({ student_id:studentId, subject_id:subjectId, exam_type:examType, marks:val });
@@ -461,13 +461,20 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
     setQueries(prev => prev.map(q => q.id === id ? { ...q, status:"Resolved" } : q));
   };
 
-  const handleSendReply = (qId, replyText, studentName) => {
+  const handleSendReply = async (qId, replyText, studentName) => {
     if (!replyText.trim()) {
       alert("Please write a reply message");
       return;
     }
-    alert(`✓ Reply sent to ${studentName}!\n\n"${replyText}"\n\nStudent has been notified via the system.`);
-    setQueryReplies(prev => ({ ...prev, [qId]: "" }));
+    try {
+      await facultyAPI.replyQuery(qId, replyText);
+      setQueries(prev => prev.map(q => q.id === qId ? { ...q, status:"Resolved", reply_message: replyText } : q));
+      setQueryReplies(prev => ({ ...prev, [qId]: "" }));
+      alert(`✓ Reply sent to ${studentName}!\n\n"${replyText}"\n\nStudent has been notified via the system.`);
+    } catch (error) {
+      console.error('Failed to send reply:', error);
+      alert(`Failed to send reply: ${error.message || 'Unknown error'}`);
+    }
   };
 
   const handleSaveProfile = async () => {
@@ -1051,6 +1058,12 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
             <span style={S.badge(q.status==="Pending"?"pending":"resolved")}>{q.status}</span>
           </div>
           <p style={{ fontSize:13, color:T.textSub, margin:"10px 0", lineHeight:1.6, paddingLeft:44 }}>{q.description || q.query}</p>
+          {q.reply_message && (
+            <div style={{ marginTop:12, marginLeft:44, padding:12, borderRadius:10, background:"rgba(16,185,129,0.12)", border:`1px solid ${T.success}` }}>
+              <div style={{ fontSize:12, fontWeight:700, color:T.success }}>Reply sent</div>
+              <div style={{ fontSize:13, color:T.textSub, marginTop:6, lineHeight:1.6 }}>{q.reply_message}</div>
+            </div>
+          )}
           
           {q.status === "Pending" && (
             <>
