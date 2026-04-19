@@ -21,11 +21,15 @@ function UploadResults({ onUploadSuccess }) {
 
   const loadMarks = async () => {
     try {
-      const marksData = await facultyAPI.getMarks({
+      const filters = {
         course,
         semester: `Sem${semester}`,
         exam_type: examType,
-      });
+      };
+      if (selectedSubject) {
+        filters.subject_id = selectedSubject;
+      }
+      const marksData = await facultyAPI.getMarks(filters);
       const filtered = (marksData || []).filter((r) => r.mark_id);
       setExistingMarks(filtered);
     } catch (err) {
@@ -67,13 +71,14 @@ function UploadResults({ onUploadSuccess }) {
     loadMasterData();
     loadMarks();
     loadClassResults();
-  }, [course, semester, examType]);
+  }, [course, semester, examType, selectedSubject]);
 
   const parseCSV = (text) => {
     const lines = text.trim().split(/\r?\n/);
     if (lines.length === 0) return [];
 
-    const headers = lines[0].split(",").map((h) => h.trim());
+    const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
+    console.log('CSV Headers:', headers);
 
     return lines.slice(1).filter(Boolean).map((line) => {
       const values = line.split(",");
@@ -96,6 +101,7 @@ function UploadResults({ onUploadSuccess }) {
 
       const text = reader.result;
       const parsed = parseCSV(text);
+      console.log('Parsed CSV Data:', parsed);
 
       setResults(parsed);
 
@@ -107,55 +113,90 @@ function UploadResults({ onUploadSuccess }) {
 
   };
 
+  const mapExamType = (examTypeFromCSV) => {
+    const csvExamType = String(examTypeFromCSV || "").trim().toLowerCase();
+    
+    // Map common variations
+    if (csvExamType.includes('final') || csvExamType.includes('result')) {
+      return 'FULLRESULT';
+    }
+    if (csvExamType.includes('cie1') || csvExamType === 'cie1') {
+      return 'CIE1';
+    }
+    if (csvExamType.includes('cie2') || csvExamType === 'cie2') {
+      return 'CIE2';
+    }
+    if (csvExamType.includes('internal1') || csvExamType === 'internal1') {
+      return 'Internal1';
+    }
+    if (csvExamType.includes('internal2') || csvExamType === 'internal2') {
+      return 'Internal2';
+    }
+    
+    // If no mapping found, try to normalize it
+    const normalized = csvExamType.replace(/\s+/g, '').toUpperCase();
+    console.log('mapExamType:', csvExamType, '=>', normalized);
+    return normalized;
+  };
+
   const processResults = async () => {
     if (results.length === 0) {
       setStatus("⚠️ Please upload a CSV file first.");
       return;
     }
 
-    const studentMap = new Map(
-      students.map((s) => [String(s.enroll || "").toLowerCase(), s.id])
-    );
-
-    const subjectMap = new Map();
-    subjects.forEach((sub) => {
-      const lowName = String(sub.name || "").toLowerCase();
-      subjectMap.set(lowName, sub.id);
-      if (sub.code) {
-        subjectMap.set(String(sub.code).toLowerCase(), sub.id);
-      }
-    });
-
     const entries = [];
     const errors = [];
 
     results.forEach((row, index) => {
-      const enroll = String(row.enroll || "").trim().toLowerCase();
-      const subjectName = String(row.subject || "").trim().toLowerCase();
-      const marks = Number(row.marks);
+      // Handle both formats: student_id directly, OR enroll lookup
+      let studentId = row.student_id;
+      let subjectId = row.subject_id;
+      let marksVal = row.marks;
+      let examTypeVal = row.exam_type ? mapExamType(row.exam_type) : examType;
 
-      const studentId = studentMap.get(enroll);
-      const subjectId = subjectMap.get(subjectName);
+      // If student_id not in CSV, try lookup by enroll
+      if (!studentId && row.enroll) {
+        const student = students.find(s => String(s.enroll || "").toLowerCase() === String(row.enroll || "").toLowerCase());
+        studentId = student?.id;
+      }
 
-      if (!studentId) {
-        errors.push(`Row ${index + 1}: Student with enroll '${row.enroll}' not found`);
+      // If subject_id not in CSV, try lookup by subject name
+      if (!subjectId && row.subject) {
+        const subjectName = String(row.subject || "").toLowerCase();
+        const subject = subjects.find(s => 
+          String(s.name || "").toLowerCase() === subjectName || 
+          String(s.code || "").toLowerCase() === subjectName
+        );
+        subjectId = subject?.id;
+      }
+
+      // Validate required fields
+      studentId = Number(studentId);
+      subjectId = Number(subjectId);
+      marksVal = Number(marksVal);
+
+      console.log(`Row ${index + 1}:`, { studentId, subjectId, examTypeVal, marksVal, rawRow: row });
+
+      if (!studentId || Number.isNaN(studentId)) {
+        errors.push(`Row ${index + 1}: Invalid or missing student_id`);
         return;
       }
-      if (!subjectId) {
-        errors.push(`Row ${index + 1}: Subject '${row.subject}' not found`);
+      if (!subjectId || Number.isNaN(subjectId)) {
+        errors.push(`Row ${index + 1}: Invalid or missing subject_id`);
         return;
       }
-      if (Number.isNaN(marks)) {
-        errors.push(`Row ${index + 1}: Invalid marks '${row.marks}'`);
+      if (Number.isNaN(marksVal)) {
+        errors.push(`Row ${index + 1}: Invalid marks value`);
         return;
       }
 
       entries.push({
         student_id: studentId,
         subject_id: subjectId,
-        exam_type: examType,
-        marks,
-        max_marks: 100,
+        exam_type: examTypeVal,
+        marks: marksVal,
+        max_marks: row.max_marks || 100,
       });
     });
 
@@ -334,59 +375,117 @@ function UploadResults({ onUploadSuccess }) {
       {/* EXISTING MARKS FROM DATABASE */}
       <div className="existing-marks">
         <h3>Existing Marks (DB)</h3>
-        {existingMarks.length === 0 ? (
-          <p>No marks found for selected course/semester/exam.</p>
-        ) : (
-          <table className="results-table">
-            <thead>
-              <tr>
-                <th>Student</th>
-                <th>Enroll</th>
-                <th>Subject</th>
-                <th>Exam</th>
-                <th>Marks</th>
-                <th>%</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {existingMarks.map((row) => (
-                <tr key={row.mark_id || `${row.student_id}-${row.subject}-${row.exam_type}`}>
-                  <td>{row.name}</td>
-                  <td>{row.enroll}</td>
-                  <td>{row.subject || 'N/A'}</td>
-                  <td>{row.exam_type}</td>
-                  <td>
-                    {editingMarkId === row.mark_id ? (
-                      <input
-                        type="number"
-                        value={editingMarks.marks}
-                        onChange={e => setEditingMarks({...editingMarks, marks: e.target.value})}
-                        style={{width: '60px', padding: '4px'}}
-                      />
-                    ) : (
-                      row.marks
-                    )}
-                  </td>
-                  <td>{row.pct || '0'}</td>
-                  <td>
-                    {editingMarkId === row.mark_id ? (
-                      <>
-                        <button className="edit-btn" onClick={handleSaveEdit} style={{background: '#10b981', marginRight: '5px'}}>Save</button>
-                        <button className="delete-btn" onClick={() => setEditingMarkId(null)}>Cancel</button>
-                      </>
-                    ) : (
-                      <>
-                        <button className="edit-btn" onClick={() => handleEditMark(row)} style={{marginRight: '5px'}}>✎ Edit</button>
-                        <button className="delete-btn" onClick={() => deleteMark(row.mark_id)}>Delete</button>
-                      </>
-                    )}
-                  </td>
+        {(() => {
+          // Filter marks by selected subject if any
+          const filteredMarks = selectedSubject
+            ? existingMarks.filter(row => String(row.subject_id) === String(selectedSubject))
+            : existingMarks;
+          if (filteredMarks.length === 0) {
+            return <p>No marks found for selected course/semester/exam/subject.</p>;
+          }
+          // If a subject is selected, show a minimal table
+          if (selectedSubject) {
+            return (
+              <table className="results-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Enroll</th>
+                    <th>Subject ID</th>
+                    <th>Marks</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredMarks.map((row) => (
+                    <tr key={row.mark_id || `${row.student_id}-${row.subject_id}`}>
+                      <td>{row.name}</td>
+                      <td>{row.enroll}</td>
+                      <td>{row.subject_id}</td>
+                      <td>
+                        {editingMarkId === row.mark_id ? (
+                          <input
+                            type="number"
+                            value={editingMarks.marks}
+                            onChange={e => setEditingMarks({...editingMarks, marks: e.target.value})}
+                            style={{width: '60px', padding: '4px'}} 
+                          />
+                        ) : (
+                          row.marks
+                        )}
+                      </td>
+                      <td>
+                        {editingMarkId === row.mark_id ? (
+                          <>
+                            <button className="edit-btn" onClick={handleSaveEdit} style={{background: '#10b981', marginRight: '5px'}}>Save</button>
+                            <button className="delete-btn" onClick={() => setEditingMarkId(null)}>Cancel</button>
+                          </>
+                        ) : (
+                          <>
+                            <button className="edit-btn" onClick={() => handleEditMark(row)} style={{marginRight: '5px'}}>✎ Edit</button>
+                            <button className="delete-btn" onClick={() => deleteMark(row.mark_id)}>Delete</button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            );
+          }
+          // Otherwise, show the default table
+          return (
+            <table className="results-table">
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Enroll</th>
+                  <th>Subject</th>
+                  <th>Exam</th>
+                  <th>Marks</th>
+                  <th>%</th>
+                  <th>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+              </thead>
+              <tbody>
+                {filteredMarks.map((row) => (
+                  <tr key={row.mark_id || `${row.student_id}-${row.subject}-${row.exam_type}`}>
+                    <td>{row.name}</td>
+                    <td>{row.enroll}</td>
+                    <td>{row.subject || 'N/A'}</td>
+                    <td>{row.exam_type}</td>
+                    <td>
+                      {editingMarkId === row.mark_id ? (
+                        <input
+                          type="number"
+                          value={editingMarks.marks}
+                          onChange={e => setEditingMarks({...editingMarks, marks: e.target.value})}
+                          style={{width: '60px', padding: '4px'}} 
+                        />
+                      ) : (
+                        row.marks
+                      )}
+                    </td>
+                    <td>{row.pct || '0'}</td>
+                    <td>
+                      {editingMarkId === row.mark_id ? (
+                        <>
+                          <button className="edit-btn" onClick={handleSaveEdit} style={{background: '#10b981', marginRight: '5px'}}>Save</button>
+                          <button className="delete-btn" onClick={() => setEditingMarkId(null)}>Cancel</button>
+                        </>
+                      ) : (
+                        <>
+                          <button className="edit-btn" onClick={() => handleEditMark(row)} style={{marginRight: '5px'}}>✎ Edit</button>
+                          <button className="delete-btn" onClick={() => deleteMark(row.mark_id)}>Delete</button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          );
+        })()}
       </div>
 
       {/* CLASS RESULT GRID */}

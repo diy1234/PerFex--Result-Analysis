@@ -173,45 +173,63 @@ def get_marks():
             SELECT m.id AS mark_id, u.id AS student_id, u.name, u.enroll,
                    m.marks, m.max_marks, m.exam_type,
                    ROUND(m.marks*100.0/m.max_marks,1) AS pct,
-                   s.name AS subject, s.code AS subject_code
+                   s.id AS subject_id, s.name AS subject, s.code AS subject_code
             FROM users u
-            LEFT JOIN marks m ON m.student_id=u.id
-                AND (?1 IS NULL OR m.subject_id=?1)
-                AND (?2 IS NULL OR m.exam_type=?2)
-            LEFT JOIN subjects s ON s.id=m.subject_id
+            INNER JOIN marks m ON m.student_id=u.id
+            INNER JOIN subjects s ON s.id=m.subject_id
             WHERE u.role='student'
         """
-        params = [subject_id, exam_type]
+        params = []
+        
+        if subject_id:
+            query += " AND m.subject_id=?"
+            params.append(subject_id)
+        if exam_type:
+            query += " AND LOWER(m.exam_type)=LOWER(?)"
+            params.append(exam_type)
+        if course:
+            query += " AND LOWER(u.course)=LOWER(?)"
+            params.append(course)
+        if semester:
+            query += " AND LOWER(u.semester)=LOWER(?)"
+            params.append(semester)
+        if section:
+            query += " AND LOWER(u.section)=LOWER(?)"
+            params.append(section)
+        
+        query += " ORDER BY u.name"
+
     else:
         query  = """
             SELECT m.id AS mark_id, u.id AS student_id, u.name, u.enroll,
                    m.marks, m.max_marks, m.exam_type,
                    ROUND(m.marks*100.0/m.max_marks,1) AS pct,
-                   s.name AS subject, s.code AS subject_code
+                   s.id AS subject_id, s.name AS subject, s.code AS subject_code
             FROM users u
-            LEFT JOIN marks m ON m.student_id=u.id
-                AND (?1 IS NULL OR m.subject_id=?1)
-                AND (?2 IS NULL OR m.exam_type=?2)
-                AND (?1 IS NOT NULL OR m.subject_id IN (
-                    SELECT subject_id FROM faculty_allocations
-                    WHERE faculty_id=?3
-                      AND (?4 IS NULL OR course=?4)
-                      AND (?5 IS NULL OR semester=?5)
-                      AND (?6 IS NULL OR section=?6)
-                ))
-            LEFT JOIN subjects s ON s.id=m.subject_id
+            INNER JOIN marks m ON m.student_id=u.id
+            INNER JOIN subjects s ON s.id=m.subject_id
+            INNER JOIN faculty_allocations fa ON fa.subject_id=m.subject_id AND fa.faculty_id=?
             WHERE u.role='student'
-                AND u.section IN (
-                    SELECT DISTINCT section FROM faculty_allocations 
-                    WHERE faculty_id=?3
-                )
         """
-        params = [subject_id, exam_type, request.user_id, course, semester, section]
-
-    if course:   query += " AND u.course=?";   params.append(course)
-    if semester: query += " AND u.semester=?"; params.append(semester)
-    if section:  query += " AND u.section=?";  params.append(section)
-    query += " ORDER BY u.name"
+        params = [request.user_id]
+        
+        if subject_id:
+            query += " AND m.subject_id=?"
+            params.append(subject_id)
+        if exam_type:
+            query += " AND LOWER(m.exam_type)=LOWER(?)"
+            params.append(exam_type)
+        if course:
+            query += " AND LOWER(u.course)=LOWER(?)"
+            params.append(course)
+        if semester:
+            query += " AND LOWER(u.semester)=LOWER(?)"
+            params.append(semester)
+        if section:
+            query += " AND LOWER(u.section)=LOWER(?)"
+            params.append(section)
+        
+        query += " ORDER BY u.name"
 
     rows = conn.execute(query, params).fetchall()
     conn.close()
@@ -266,7 +284,8 @@ def enter_marks_bulk():
 
     conn = get_db()
     saved = 0
-    for e in entries:
+    errors = []
+    for idx, e in enumerate(entries):
         try:
             conn.execute("""
                 INSERT INTO marks (student_id,subject_id,exam_type,marks,max_marks,entered_by)
@@ -277,11 +296,14 @@ def enter_marks_bulk():
             """, (e['student_id'], e['subject_id'], e['exam_type'],
                   e['marks'], e.get('max_marks', 100), request.user_id))
             saved += 1
-        except Exception:
-            pass
+        except Exception as ex:
+            errors.append(f"Row {idx+1}: {str(ex)}")
     conn.commit()
     conn.close()
-    return jsonify({'message': f'{saved} marks saved'})
+    result = {'message': f'{saved} marks saved'}
+    if errors:
+        result['errors'] = errors
+    return jsonify(result)
 
 
 # ── DELETE /api/faculty/marks/<id> ────────────────────────────────────────────
@@ -293,6 +315,26 @@ def delete_mark(mark_id):
     conn.commit()
     conn.close()
     return jsonify({'message': 'Mark deleted'})
+
+
+# ── PUT /api/faculty/marks/<mark_id> ─────────────────────────────────────────
+@faculty_bp.route('/marks/<int:mark_id>', methods=['PUT'])
+@token_required
+def update_mark(mark_id):
+    data = request.get_json() or {}
+    marks = data.get('marks')
+    max_marks = data.get('max_marks', 100)
+    if marks is None:
+        return jsonify({'error': 'marks required'}), 400
+    conn = get_db()
+    res = conn.execute("SELECT * FROM marks WHERE id=?", (mark_id,)).fetchone()
+    if not res:
+        conn.close()
+        return jsonify({'error': 'Mark entry not found'}), 404
+    conn.execute("UPDATE marks SET marks=?, max_marks=? WHERE id=?", (marks, max_marks, mark_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Mark updated'})
 
 
 # ── GET /api/faculty/class-results - Returns results only for faculty's allocations

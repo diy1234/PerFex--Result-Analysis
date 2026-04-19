@@ -247,12 +247,10 @@ export const facultyAPI = {
   deleteAnnouncement:  (id)    => api(`/faculty/announcements/${id}`, { method: 'DELETE' }),
 
   /**
-   * Student queries/concerns.
-   * Replaces the hardcoded queries array in FacultyDashboard.js
+   * Update a mark by mark_id (admin/faculty)
    */
-  getQueries:    () => api('/faculty/queries'),
-  resolveQuery:  (id) => api(`/faculty/queries/${id}/resolve`, { method: 'PUT' }),
-  replyQuery:    (id, replyMessage) => api(`/faculty/queries/${id}/reply`, { method: 'PUT', body: JSON.stringify({ reply_message: replyMessage }) }),
+  updateMark: (mark_id, data) =>
+    api(`/faculty/marks/${mark_id}`, { method: 'PUT', body: JSON.stringify(data) }),
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
