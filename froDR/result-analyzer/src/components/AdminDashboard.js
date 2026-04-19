@@ -57,8 +57,23 @@ function AdminDashboard({ setDashboard, setPage, page }) {
   const [announcements,    setAnnouncements]    = useState([]);
   const [announcementFile, setAnnouncementFile] = useState(null);
   const [newAnnouncement,  setNewAnnouncement]  = useState({
-    title:"", message:"", course:"MCA", semester:"1", subject:"DBMS", class:"All",
+    title:"", message:"", course:"MCA", semester:"1", subject:"", class:"All",
   });
+  const [subjects, setSubjects] = useState([]);
+
+  useEffect(() => {
+    adminAPI.getSubjects().then(setSubjects);
+  }, []);
+
+  // Normalize semester for comparison (DB uses 'Sem1', UI uses '1', etc.)
+  const normalizeSemester = (val) => {
+    if (!val) return '';
+    if (val.toLowerCase().startsWith('sem')) return val.trim();
+    return 'Sem' + String(val).replace(/[^0-9]/g, '');
+  };
+  const filteredSubjects = subjects.filter(
+    s => s.course === newAnnouncement.course && normalizeSemester(s.semester) === normalizeSemester(newAnnouncement.semester)
+  );
 
   /* ── Image upload ────────────────────────────────────────────────── */
   const handleImageUpload = (e) => {
@@ -168,11 +183,11 @@ function AdminDashboard({ setDashboard, setPage, page }) {
 
   const postAnnouncement = () => {
     if (!newAnnouncement.message) return;
-    adminAPI.postAnnouncement(newAnnouncement)
+    adminAPI.postAnnouncement(newAnnouncement, announcementFile)
       .then(() => adminAPI.getAnnouncements())
       .then(res => {
         setAnnouncements(res || []);
-        setNewAnnouncement({ title:"", message:"", course:"MCA", semester:"1", subject:"DBMS", class:"All" });
+        setNewAnnouncement({ title:"", message:"", course:"MCA", semester:"1", subject:"", class:"All" });
         setAnnouncementFile(null);
       })
       .catch(err => console.log(err));
@@ -328,7 +343,7 @@ function AdminDashboard({ setDashboard, setPage, page }) {
                   {[
                     { label:"Course",   field:"course",   opts:["MCA","BCA"] },
                     { label:"Semester", field:"semester", opts:["1","2","3","4"] },
-                    { label:"Subject",  field:"subject",  opts:["DBMS","OS","DS","Algo"] },
+                    { label:"Subject",  field:"subject",  opts: filteredSubjects.length > 0 ? filteredSubjects.map(s => s.name) : ["No subjects"] },
                     { label:"Class",    field:"class",    opts:["A","B","C","All"] },
                   ].map(({ label, field, opts }) => (
                     <div className="admin-announcement-field" key={field}>
@@ -374,6 +389,12 @@ function AdminDashboard({ setDashboard, setPage, page }) {
                       <span className="admin-announcement-date">{ann.date}</span>
                     </div>
                     <p>{ann.message}</p>
+                    {ann.attachment && (
+                      <div style={{ marginTop:8, display:"flex", alignItems:"center", gap:6 }}>
+                        <span style={{ fontSize:12 }}>📎</span>
+                        <span style={{ fontSize:12, color:T.accent }}>{ann.attachment.split('/').pop()}</span>
+                      </div>
+                    )}
                     <div className="admin-announcement-tags">
                       {[ann.course, `Sem ${ann.semester}`, ann.subject, `Class ${ann.class}`].map((t,i) => (
                         <span key={i} className="admin-announcement-pill">{t}</span>

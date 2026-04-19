@@ -269,22 +269,47 @@ def list_announcements():
 
 
 # ── POST /api/admin/announcements ────────────────────────────────────────────
+
+import os
+from werkzeug.utils import secure_filename
+
+UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), '..', 'uploads', 'announcements')
+ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'jpg', 'png', 'csv', 'txt'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 @admin_bp.route('/announcements', methods=['POST'])
 @token_required
 def post_announcement():
-
     if request.user_role != 'admin':
         return jsonify({'error': 'Unauthorized'}), 403
-    
-    data = request.get_json() or {}
+
+    # Accept both form-data and JSON
+    if request.content_type and request.content_type.startswith('multipart/form-data'):
+        data = request.form
+        file = request.files.get('attachment')
+    else:
+        data = request.get_json() or {}
+        file = None
+
+    attachment_path = None
+    if file and allowed_file(file.filename):
+        if not os.path.exists(UPLOAD_FOLDER):
+            os.makedirs(UPLOAD_FOLDER)
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(filepath)
+        attachment_path = f'uploads/announcements/{filename}'
+
     conn = get_db()
     conn.execute("""
-        INSERT INTO announcements (title,message,type,course,semester,subject,class,posted_by)
-        VALUES (?,?,?,?,?,?,?,?)
+        INSERT INTO announcements (title, message, type, course, semester, subject, class, posted_by, attachment)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         data.get('title'), data.get('message'), data.get('type', 'Notice'),
         data.get('course'), data.get('semester'), data.get('subject'),
-        data.get('class', 'All'), request.user_id
+        data.get('class', 'All'), request.user_id, attachment_path
     ))
     conn.commit()
     conn.close()

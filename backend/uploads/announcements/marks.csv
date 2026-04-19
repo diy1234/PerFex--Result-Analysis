@@ -1,0 +1,4 @@
+student_id,subject_id,exam_type,marks,max_marks
+3,1,Internal Exam,35,40
+3,2,Internal Exam,38,40
+3,3,Internal Exam,36,40

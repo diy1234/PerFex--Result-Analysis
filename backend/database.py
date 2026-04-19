@@ -82,6 +82,12 @@ def init_db():
     except:
         pass  # Column already exists
 
+    # ── Add attachment column if it doesn't exist (migration) ────────────────────
+    try:
+        c.execute("ALTER TABLE announcements ADD COLUMN attachment TEXT")
+    except:
+        pass  # Column already exists
+
     # ── student queries / concerns ────────────────────────────────────────────
     c.execute('''CREATE TABLE IF NOT EXISTS queries (
         id             INTEGER PRIMARY KEY AUTOINCREMENT,

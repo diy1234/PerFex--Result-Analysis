@@ -208,13 +208,13 @@ def mark_all_announcements_read():
 @token_required
 def download_announcement_file(ann_id):
     conn = get_db()
-    ann = conn.execute("SELECT file_path FROM announcements WHERE id=?", (ann_id,)).fetchone()
+    ann = conn.execute("SELECT attachment FROM announcements WHERE id=?", (ann_id,)).fetchone()
     conn.close()
     
-    if not ann or not ann['file_path']:
+    if not ann or not ann['attachment']:
         return jsonify({'error': 'File not found'}), 404
     
-    file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ann['file_path'])
+    file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ann['attachment'])
     if not os.path.exists(file_path):
         return jsonify({'error': 'File not found'}), 404
     

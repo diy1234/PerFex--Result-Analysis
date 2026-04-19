@@ -286,7 +286,25 @@ export const adminAPI = {
 
   /** Announcements */
   getAnnouncements: () => api('/admin/announcements'),
-  postAnnouncement: (data) => api('/admin/announcements', { method: 'POST', body: JSON.stringify(data) }),
+  postAnnouncement: (data, file) => {
+    const formData = new FormData();
+    Object.entries(data).forEach(([key, value]) => formData.append(key, value));
+    if (file) formData.append('attachment', file);
+    const token = getToken();
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return fetch(`${BASE}/admin/announcements`, {
+      method: 'POST',
+      headers,
+      body: formData
+    }).then(async res => {
+      let data = {};
+      try { data = await res.json(); } catch { data = { error: res.statusText || 'Request failed' }; }
+      if (res.status === 401) { removeToken(); removeUser(); window.location.reload(); }
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}: Request failed`);
+      return data;
+    });
+  },
 
   /** Analytics */
   getAnalytics: (filters = {}) => {
