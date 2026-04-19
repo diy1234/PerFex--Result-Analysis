@@ -17,14 +17,19 @@ export const removeUser = ()  => localStorage.removeItem('user');
 // ── Internal fetch ───────────────────────────────────────────────────────────
 async function api(path, options = {}) {
   const token = getToken();
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = { ...(options.headers || {}) };
+
+  // Only set JSON content-type when we are not sending FormData.
+  if (!(options.body instanceof FormData) && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const res  = await fetch(`${BASE}${path}`, { ...options, headers });
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    // If token expired, clear auth and reload
     if (res.status === 401) {
       removeToken(); removeUser();
       window.location.reload();
@@ -107,7 +112,7 @@ export const studentAPI = {
    * Announcements → replaces the announcements prop.
    *   const anns = await studentAPI.getAnnouncements();
    */
-  getAnnouncements: () => api('/student/announcements'),
+  getAnnouncements: () => api('/student/announcements').then(data => Array.isArray(data) ? data : []),
 
   /**
    * Submit a concern → replaces localStorage "student_queries" write in StudentDashboard.js
@@ -192,7 +197,53 @@ export const facultyAPI = {
 
   /** Announcements */
   getAnnouncements:    ()      => api('/faculty/announcements'),
-  postAnnouncement:    (data)  => api('/faculty/announcements', { method: 'POST', body: JSON.stringify(data) }),
+  postAnnouncement:    (data, file)  => {
+    const formData = new FormData();
+    formData.append('title', data.title);
+    formData.append('message', data.message);
+    formData.append('type', data.type || 'Notice');
+    formData.append('course', data.course);
+    formData.append('semester', data.semester);
+    formData.append('subject', data.subject);
+    formData.append('class', data.class || 'All');
+    if (file) {
+      formData.append('file', file);
+    }
+    
+    // Send FormData with authentication
+    const token = getToken();
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    
+    return fetch(`${BASE}/faculty/announcements`, {
+      method: 'POST',
+      headers,
+      body: formData
+    }).then(async res => {
+      // Try to parse JSON response
+      let data = {};
+      try {
+        data = await res.json();
+      } catch (e) {
+        // Response might not be JSON
+        data = { error: res.statusText || 'Request failed' };
+      }
+      
+      if (res.status === 401) {
+        removeToken(); removeUser();
+        window.location.reload();
+      }
+      
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}: Request failed`);
+      }
+      
+      return data;
+    }).catch(error => {
+      console.error('postAnnouncement error:', error);
+      throw error;
+    });
+  },
   deleteAnnouncement:  (id)    => api(`/faculty/announcements/${id}`, { method: 'DELETE' }),
 
   /**

@@ -72,8 +72,15 @@ def init_db():
         subject   TEXT,
         class     TEXT DEFAULT 'All',
         posted_by INTEGER REFERENCES users(id),
+        file_path TEXT,
         date      TEXT DEFAULT (date('now'))
     )''')
+    
+    # ── Add file_path column if it doesn't exist (migration) ────────────────────
+    try:
+        c.execute("ALTER TABLE announcements ADD COLUMN file_path TEXT")
+    except:
+        pass  # Column already exists
 
     # ── student queries / concerns ────────────────────────────────────────────
     c.execute('''CREATE TABLE IF NOT EXISTS queries (

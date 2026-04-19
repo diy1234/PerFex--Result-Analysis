@@ -244,6 +244,36 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
       .catch(() => {});
   }, [course, semester, subject, selectedSubjectId, examType, classSection]);
 
+  /* ── Validate announcement form fields when allocations change ────────── */
+  useEffect(() => {
+    if (facultyAllocations.length === 0) return;
+    
+    // Get valid subjects for current course/semester
+    const validSubjects = [...new Set(
+      facultyAllocations
+        .filter(a => a.course === newAnnouncement.course && a.semester === newAnnouncement.semester)
+        .map(a => a.subject_name)
+    )];
+    
+    // Get valid sections for current course/semester
+    const validSections = [...new Set(
+      facultyAllocations
+        .filter(a => a.course === newAnnouncement.course && a.semester === newAnnouncement.semester)
+        .map(a => a.section)
+        .filter(s => s)
+    )];
+    
+    // Reset subject if not valid
+    if (validSubjects.length > 0 && !validSubjects.includes(newAnnouncement.subject)) {
+      setNewAnnouncement(prev => ({ ...prev, subject: validSubjects[0] }));
+    }
+    
+    // Reset class if not valid
+    if (newAnnouncement.class !== "All" && validSections.length > 0 && !validSections.includes(newAnnouncement.class)) {
+      setNewAnnouncement(prev => ({ ...prev, class: "All" }));
+    }
+  }, [facultyAllocations, newAnnouncement.course, newAnnouncement.semester]);
+
   /* ── Derived data ────────────────────────────────────────────────────── */
   const selectedSubjectKey = selectedSubjectId ? normaliseSubjectKey(subject) : null;
 
@@ -387,12 +417,43 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
   };
 
   const handleAddAnnouncement = async () => {
-    if (!newAnnouncement.title || !newAnnouncement.message) return;
-    await facultyAPI.postAnnouncement({ ...newAnnouncement, type:'Notice' });
-    const updated = await facultyAPI.getAnnouncements();
-    setAnnouncements(updated);
-    setNewAnnouncement({ title:"", message:"", course:"MCA", semester:"Sem1", subject:"DBMS", class:"All" });
-    setAnnouncementFile(null);
+    if (!newAnnouncement.title || !newAnnouncement.message) {
+      alert("Please fill in title and message");
+      return;
+    }
+    if (!newAnnouncement.subject || !newAnnouncement.class) {
+      alert("Please select subject and class from your allocated assignments");
+      return;
+    }
+    
+    try {
+      console.log("Posting announcement:", newAnnouncement, "File:", announcementFile);
+      await facultyAPI.postAnnouncement({ ...newAnnouncement, type:'Notice' }, announcementFile);
+      console.log("Announcement posted successfully");
+      
+      const updated = await facultyAPI.getAnnouncements();
+      setAnnouncements(updated);
+      
+      // Reset to first available allocation
+      if (availableCourses.length > 0) {
+        const firstAllocation = facultyAllocations.find(a => a.course === availableCourses[0]);
+        setNewAnnouncement({ 
+          title:"", 
+          message:"", 
+          course: availableCourses[0],
+          semester: firstAllocation?.semester || "Sem1",
+          subject: firstAllocation?.subject_name || "DBMS",
+          class: firstAllocation?.section || "All"
+        });
+      } else {
+        setNewAnnouncement({ title:"", message:"", course:"MCA", semester:"Sem1", subject:"DBMS", class:"All" });
+      }
+      setAnnouncementFile(null);
+      alert("✓ Announcement posted successfully!");
+    } catch (error) {
+      console.error("Failed to post announcement:", error);
+      alert(`Error posting announcement: ${error.message || 'Unknown error'}`);
+    }
   };
 
   const handleReplyQuery = async (id) => {
@@ -867,21 +928,40 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
     );
   };
 
-  const ViewAnnouncements = () => (
+  const ViewAnnouncements = () => {
+    // Dynamic options based on faculty's allocations
+    const annSubjects = [...new Set(
+      facultyAllocations
+        .filter(a => a.course === newAnnouncement.course && a.semester === newAnnouncement.semester)
+        .map(a => a.subject_name)
+    )].sort();
+    
+    const annSections = [...new Set(
+      facultyAllocations
+        .filter(a => a.course === newAnnouncement.course && a.semester === newAnnouncement.semester)
+        .map(a => a.section)
+        .filter(s => s)
+    )].sort();
+    annSections.unshift("All");
+    
+    return (
     <>
       <SectionHeader title="Announcements" subtitle="Post updates and notices to students" />
       <div style={{ ...S.card, marginBottom:20 }}>
         <div style={{ fontSize:14, fontWeight:600, color:T.text, marginBottom:16 }}>Post New Announcement</div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:12, marginBottom:14 }}>
           {[
-            { label:"Course",   field:"course",   options:["MCA","BCA"] },
-            { label:"Semester", field:"semester", options:["Sem1","Sem2","Sem3","Sem4"] },
-            { label:"Subject",  field:"subject",  options:["DBMS","OS","DS","Algo"] },
-            { label:"Class",    field:"class",    options:["A","B","C","All"] },
+            { label:"Course",   field:"course",   options:availableCourses },
+            { label:"Semester", field:"semester", options:availableSemesters },
+            { label:"Subject",  field:"subject",  options:annSubjects },
+            { label:"Class",    field:"class",    options:annSections },
           ].map(({ label, field, options }) => (
             <div key={field}>
               <label style={S.label}>{label}</label>
-              <select style={S.input} value={newAnnouncement[field]} onChange={e => setNewAnnouncement({ ...newAnnouncement, [field]:e.target.value })}>
+              <select style={S.input} value={newAnnouncement[field]} onChange={e => {
+                const newVal = e.target.value;
+                setNewAnnouncement({ ...newAnnouncement, [field]:newVal });
+              }}>
                 {options.map(o => <option key={o}>{o}</option>)}
               </select>
             </div>
@@ -933,15 +1013,24 @@ export default function FacultyDashboard({ setDashboard, announcements, setAnnou
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
             <div style={{ fontSize:14, fontWeight:600, color:T.text }}>{ann.title}</div>
             <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap", justifyContent:"flex-end" }}>
-              {[ann.course, `Sem ${ann.semester}`, ann.subject, `Class ${ann.class}`].map((tag,i) => <span key={i} style={S.badge("info")}>{tag}</span>)}
+              {[ann.course, `Sem ${ann.semester}`, ann.subject, `Class ${ann.section || ann.class}`].map((tag,i) => <span key={i} style={S.badge("info")}>{tag}</span>)}
               <span style={{ fontSize:11, color:T.muted }}>{ann.date}</span>
             </div>
           </div>
-          <p style={{ fontSize:13, color:T.textSub, lineHeight:1.6, margin:0 }}>{ann.message}</p>
+          <p style={{ fontSize:13, color:T.textSub, lineHeight:1.6, margin:0, marginBottom:ann.file_path?10:0 }}>{ann.message}</p>
+          {ann.file_path && (
+            <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:8, padding:"10px 12px", background:T.accentSoft, borderRadius:8, width:"fit-content" }}>
+              <span style={{ fontSize:13, color:T.accent }}>📎</span>
+              <a href={`http://localhost:5000/api/faculty/announcements/${ann.id}/download`} style={{ fontSize:12, color:T.accent, textDecoration:"none", fontWeight:500, cursor:"pointer" }} download>
+                Download File
+              </a>
+            </div>
+          )}
         </div>
       ))}
     </>
   );
+  };
 
   const ViewQueries = () => (
     <>

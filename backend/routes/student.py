@@ -1,6 +1,7 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_file
 from database import get_db
 from auth_utils import token_required
+import os
 
 student_bp = Blueprint('student', __name__)
 
@@ -130,7 +131,7 @@ def get_announcements():
     semestreq = semester.lower().replace('sem', '').strip()
 
     rows = conn.execute("""
-        SELECT a.*, u.name AS posted_by_name,
+        SELECT a.*, a.class AS section, u.name AS posted_by_name,
                CASE WHEN ar.id IS NOT NULL THEN 1 ELSE 0 END AS read
         FROM announcements a
         LEFT JOIN users u ON u.id = a.posted_by
@@ -200,6 +201,24 @@ def mark_all_announcements_read():
     conn.commit()
     conn.close()
     return jsonify({'message': 'All announcements marked read'})
+
+
+# ── GET /api/student/announcements/<id>/download ─────────────────────────────
+@student_bp.route('/announcements/<int:ann_id>/download', methods=['GET'])
+@token_required
+def download_announcement_file(ann_id):
+    conn = get_db()
+    ann = conn.execute("SELECT file_path FROM announcements WHERE id=?", (ann_id,)).fetchone()
+    conn.close()
+    
+    if not ann or not ann['file_path']:
+        return jsonify({'error': 'File not found'}), 404
+    
+    file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ann['file_path'])
+    if not os.path.exists(file_path):
+        return jsonify({'error': 'File not found'}), 404
+    
+    return send_file(file_path, as_attachment=True)
 
 
 # ── POST /api/student/concerns ────────────────────────────────────────────────

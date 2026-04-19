@@ -1,6 +1,9 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_file
+from werkzeug.utils import secure_filename
 from database import get_db
 from auth_utils import token_required
+import os
+from datetime import datetime
 
 faculty_bp = Blueprint('faculty', __name__)
 
@@ -370,7 +373,7 @@ def class_results():
 def get_announcements():
     conn = get_db()
     rows = conn.execute("""
-        SELECT a.*, u.name AS posted_by_name
+        SELECT a.*, a.class AS section, u.name AS posted_by_name
         FROM announcements a LEFT JOIN users u ON u.id=a.posted_by
         ORDER BY a.date DESC
     """).fetchall()
@@ -382,19 +385,51 @@ def get_announcements():
 @faculty_bp.route('/announcements', methods=['POST'])
 @token_required
 def post_announcement():
-    data = request.get_json() or {}
-    conn = get_db()
-    conn.execute("""
-        INSERT INTO announcements (title,message,type,course,semester,subject,class,posted_by)
-        VALUES (?,?,?,?,?,?,?,?)
-    """, (
-        data.get('title'), data.get('message'), data.get('type', 'Notice'),
-        data.get('course'), data.get('semester'), data.get('subject'),
-        data.get('class', 'All'), request.user_id
-    ))
-    conn.commit()
-    conn.close()
-    return jsonify({'message': 'Announcement posted'}), 201
+    try:
+        # Handle both form data and JSON
+        data = request.form.to_dict() if request.form else (request.get_json() or {})
+        
+        file_path = None
+        # Check if file is present in the request
+        if 'file' in request.files:
+            file = request.files['file']
+            if file and file.filename:
+                # Create uploads directory if it doesn't exist
+                uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads', 'announcements')
+                os.makedirs(uploads_dir, exist_ok=True)
+                
+                # Generate unique filename with timestamp
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_')
+                filename = timestamp + secure_filename(file.filename)
+                file_path_full = os.path.join(uploads_dir, filename)
+                
+                # Save the file
+                file.save(file_path_full)
+                # Store relative path for database
+                file_path = os.path.join('uploads', 'announcements', filename)
+        
+        conn = get_db()
+        
+        # Check if file_path column exists, if not add it
+        try:
+            conn.execute("ALTER TABLE announcements ADD COLUMN file_path TEXT")
+            conn.commit()
+        except:
+            pass  # Column already exists
+        
+        conn.execute("""
+            INSERT INTO announcements (title,message,type,course,semester,subject,class,posted_by,file_path)
+            VALUES (?,?,?,?,?,?,?,?,?)
+        """, (
+            data.get('title'), data.get('message'), data.get('type', 'Notice'),
+            data.get('course'), data.get('semester'), data.get('subject'),
+            data.get('class', 'All'), request.user_id, file_path
+        ))
+        conn.commit()
+        conn.close()
+        return jsonify({'message': 'Announcement posted', 'file_path': file_path}), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
 
 # ── DELETE /api/faculty/announcements/<id> ───────────────────────────────────
@@ -402,9 +437,20 @@ def post_announcement():
 @token_required
 def delete_announcement(ann_id):
     conn = get_db()
+    ann = conn.execute("SELECT file_path FROM announcements WHERE id=?", (ann_id,)).fetchone()
     conn.execute("DELETE FROM announcements WHERE id=?", (ann_id,))
     conn.commit()
     conn.close()
+    
+    # Delete file if it exists
+    if ann and ann['file_path']:
+        file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ann['file_path'])
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except:
+                pass
+    
     return jsonify({'message': 'Deleted'})
 
 

@@ -27,7 +27,7 @@ ChartJS.register(
 /* ════════════════════════════════════════════════════════════════════════════
    MAIN COMPONENT
 ══════════════════════════════════════════════════════════════════════════════ */
-function StudentDashboard({ setDashboard, setPage }) {
+function StudentDashboard({ setDashboard, setPage, announcements: initialAnnouncements = [] }) {
 
   /* ── State ─────────────────────────────────────────────────────────────── */
   const [view, setView]     = useState("dashboard");
@@ -53,9 +53,13 @@ function StudentDashboard({ setDashboard, setPage }) {
   const [summary, setSummary] = useState({ overall_pct: 0, subjects: [] });
 
   // Notifications — from backend
-  const [announcements, setAnnouncements] = useState([]);
+  const [announcements, setAnnouncements] = useState(initialAnnouncements);
   const [notifOpen, setNotifOpen]         = useState(false);
   const notifRef = useRef(null);
+
+  useEffect(() => {
+    setAnnouncements(initialAnnouncements);
+  }, [initialAnnouncements]);
 
   // Subjects — from backend
   const [subjects,       setSubjects]       = useState([]);
@@ -78,6 +82,39 @@ function StudentDashboard({ setDashboard, setPage }) {
       throw new Error(data.error || 'Request failed');
     }
     return res.json().catch(() => ({}));
+  };
+
+  const downloadAnnouncementFile = async (announcement) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) throw new Error('You must be logged in to download files.');
+
+      const response = await fetch(`http://localhost:5000/api/student/announcements/${announcement.id}/download`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Download failed');
+      }
+
+      const blob = await response.blob();
+      const filename = announcement.file_path
+        ? announcement.file_path.split('/').pop().split('\\').pop()
+        : `announcement-${announcement.id}`;
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Download error:', err);
+      alert(err.message || 'Unable to download attachment.');
+    }
   };
 
   /* ── Effects ───────────────────────────────────────────────────────────── */
@@ -788,11 +825,23 @@ function StudentDashboard({ setDashboard, setPage }) {
                       <span style={{ fontSize:11, color:t.textSub, whiteSpace:"nowrap" }}>{ann.date}</span>
                     </div>
                     <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
-                      {[ann.course,`Sem ${ann.semester}`,ann.subject,`Class ${ann.class}`].map((tag,i)=>(
+                      {[ann.course, `Sem ${ann.semester}`, ann.subject, `Class ${ann.section || ann.class}`].map((tag,i)=>(
                         <span key={i} style={{ fontSize:11, fontWeight:600, background:dark?"#1e3a6e33":"#eff6ff", color:"#3b82f6", border:`1px solid ${dark?"#1e3a6e":"#bfdbfe"}`, padding:"3px 8px", borderRadius:20 }}>{tag}</span>
                       ))}
                     </div>
-                    <p style={{ fontSize:13, color:t.textSub, lineHeight:1.6, margin:0 }}>{ann.message}</p>
+                    <p style={{ fontSize:13, color:t.textSub, lineHeight:1.6, margin:0, marginBottom:ann.file_path?10:0 }}>{ann.message}</p>
+                    {ann.file_path && (
+                      <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:8, padding:"10px 12px", background:dark?"#1e3a6e33":"#eff6ff", borderRadius:8, width:"fit-content" }}>
+                        <span style={{ fontSize:13, color:"#3b82f6" }}>📎</span>
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); downloadAnnouncementFile(ann); }}
+                          style={{ fontSize:12, color:"#3b82f6", background:"transparent", border:"none", padding:0, textDecoration:"underline", cursor:"pointer", fontWeight:500 }}
+                        >
+                          Download File
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               }) : (
