@@ -173,7 +173,7 @@ def get_marks():
             SELECT m.id AS mark_id, u.id AS student_id, u.name, u.enroll,
                    m.marks, m.max_marks, m.exam_type,
                    ROUND(m.marks*100.0/m.max_marks,1) AS pct,
-                   s.name AS subject
+                   s.name AS subject, s.code AS subject_code
             FROM users u
             LEFT JOIN marks m ON m.student_id=u.id
                 AND (?1 IS NULL OR m.subject_id=?1)
@@ -187,7 +187,7 @@ def get_marks():
             SELECT m.id AS mark_id, u.id AS student_id, u.name, u.enroll,
                    m.marks, m.max_marks, m.exam_type,
                    ROUND(m.marks*100.0/m.max_marks,1) AS pct,
-                   s.name AS subject
+                   s.name AS subject, s.code AS subject_code
             FROM users u
             LEFT JOIN marks m ON m.student_id=u.id
                 AND (?1 IS NULL OR m.subject_id=?1)
