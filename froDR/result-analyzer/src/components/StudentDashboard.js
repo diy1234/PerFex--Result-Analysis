@@ -100,8 +100,8 @@ function StudentDashboard({ setDashboard, setPage, announcements: initialAnnounc
       }
 
       const blob = await response.blob();
-      const filename = announcement.attachment
-        ? announcement.attachment.split('/').pop().split('\\').pop()
+      const filename = announcement.file_path
+        ? announcement.file_path.split('/').pop().split('\\').pop()
         : `announcement-${announcement.id}`;
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -835,8 +835,8 @@ function StudentDashboard({ setDashboard, setPage, announcements: initialAnnounc
                         <span key={i} style={{ fontSize:11, fontWeight:600, background:dark?"#1e3a6e33":"#eff6ff", color:"#3b82f6", border:`1px solid ${dark?"#1e3a6e":"#bfdbfe"}`, padding:"3px 8px", borderRadius:20 }}>{tag}</span>
                       ))}
                     </div>
-                    <p style={{ fontSize:13, color:t.textSub, lineHeight:1.6, margin:0, marginBottom:ann.attachment?10:0 }}>{ann.message}</p>
-                    {ann.attachment && (
+                    <p style={{ fontSize:13, color:t.textSub, lineHeight:1.6, margin:0, marginBottom:ann.file_path?10:0 }}>{ann.message}</p>
+                    {ann.file_path && (
                       <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:8, padding:"10px 12px", background:dark?"#1e3a6e33":"#eff6ff", borderRadius:8, width:"fit-content" }}>
                         <span style={{ fontSize:13, color:"#3b82f6" }}>📎</span>
                         <button

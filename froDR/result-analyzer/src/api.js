@@ -251,6 +251,26 @@ export const facultyAPI = {
    */
   updateMark: (mark_id, data) =>
     api(`/faculty/marks/${mark_id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  /**
+   * Get student queries/concerns
+   *   const queries = await facultyAPI.getQueries();
+   */
+  getQueries: () => api('/faculty/queries'),
+
+  /**
+   * Resolve a query
+   *   await facultyAPI.resolveQuery(queryId);
+   */
+  resolveQuery: (queryId) =>
+    api(`/faculty/queries/${queryId}/resolve`, { method: 'PUT', body: JSON.stringify({}) }),
+
+  /**
+   * Reply to a query
+   *   await facultyAPI.replyQuery(queryId, { reply_message: 'Message' });
+   */
+  replyQuery: (queryId, data) =>
+    api(`/faculty/queries/${queryId}/reply`, { method: 'PUT', body: JSON.stringify(data) }),
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════

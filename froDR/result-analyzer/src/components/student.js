@@ -35,44 +35,90 @@ function Students() {
           return;
         }
 
-        // Parse CSV (first line is header)
+        // Parse CSV (first line is header) - case insensitive
         const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
         const enrollIdx = headers.indexOf('enroll');
         const nameIdx = headers.indexOf('name');
         const courseIdx = headers.indexOf('course');
         const semesterIdx = headers.indexOf('semester');
+        const emailIdx = headers.findIndex(h => h === 'mail' || h === 'email');
+        const sectionIdx = headers.indexOf('section');
 
-        if (enrollIdx === -1 || nameIdx === -1) {
-          setUploadStatus('❌ CSV must have enroll and name columns');
+        console.log('CSV Headers:', headers);
+        console.log('Index positions:', { enrollIdx, nameIdx, courseIdx, semesterIdx, emailIdx, sectionIdx });
+
+        if (enrollIdx === -1 || nameIdx === -1 || emailIdx === -1) {
+          setUploadStatus('❌ CSV must have enroll, name, and email (or mail) columns');
           return;
         }
 
         const studentsList = [];
+        const errors = [];
+
         for (let i = 1; i < lines.length; i++) {
-          const cols = lines[i].split(',').map(c => c.trim());
-          if (cols[0]) {
-            studentsList.push({
-              enroll: cols[enrollIdx],
-              name: cols[nameIdx],
-              course: cols[courseIdx] || 'N/A',
-              semester: cols[semesterIdx] || '1',
-              role: 'student'
-            });
+          const line = lines[i].trim();
+          if (!line) continue; // Skip empty lines
+          
+          const cols = line.split(',').map(c => c.trim());
+          if (!cols[0]) continue; // Skip rows with no enrollment number
+          
+          const enroll = cols[enrollIdx];
+          const name = cols[nameIdx];
+          const email = cols[emailIdx];
+          const course = cols[courseIdx] || 'MCA';
+          const semester = cols[semesterIdx] || '1';
+          const section = cols[sectionIdx] || 'A';
+
+          if (!email) {
+            errors.push(`Row ${i}: Missing email for student ${enroll}`);
+            continue;
           }
+
+          studentsList.push({
+            enroll,
+            name,
+            email,
+            course,
+            semester: `Sem${semester}`,
+            section,
+            password: '12345',
+            role: 'student'
+          });
+        }
+
+        if (errors.length > 0) {
+          console.warn('CSV parsing errors:', errors);
         }
 
         // Bulk upload
+        let uploadedCount = 0;
         for (const student of studentsList) {
-          await adminAPI.createUser(student);
+          try {
+            console.log('Uploading student:', student);
+            await adminAPI.createUser(student);
+            uploadedCount++;
+          } catch (err) {
+            console.error('Error uploading student:', student.enroll, err);
+            errors.push(`Row: ${student.enroll} - ${err.message || err}`);
+          }
         }
 
         const updated = await adminAPI.getUsers({ role: "student" });
         setStudents(updated);
-        setUploadStatus(`✔ ${studentsList.length} students uploaded successfully`);
-        setTimeout(() => setUploadStatus(''), 3000);
+        
+        let statusMsg = `✔ ${uploadedCount} students uploaded successfully`;
+        if (errors.length > 0) {
+          statusMsg += ` (${errors.length} errors: ${errors.slice(0, 3).join('; ')})`;
+          if (errors.length > 3) {
+            statusMsg += `, ...`;
+          }
+        }
+        setUploadStatus(statusMsg);
+        console.log('Upload complete:', { uploadedCount, errors });
+        setTimeout(() => setUploadStatus(''), 8000);
       } catch (err) {
         console.error('File upload error:', err);
-        setUploadStatus('❌ Error uploading file');
+        setUploadStatus(`❌ Error uploading file: ${err.message || err}`);
       }
     };
     reader.readAsText(file);

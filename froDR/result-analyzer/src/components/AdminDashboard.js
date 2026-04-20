@@ -39,8 +39,8 @@ function AdminDashboard({ setDashboard, setPage, page }) {
   // Applied filters (what's actually loaded)
   const [course,    setCourse]    = useState("MCA");
   const [session,   setSession]   = useState("2024-25");
-  const [semester,  setSemester]  = useState("1");
-  const [examType,  setExamType]  = useState("CIE1");
+  const [semester,  setSemester]  = useState("");  // Empty initially to show all data
+  const [examType,  setExamType]  = useState("");  // Empty initially to show all data
   
   const [darkMode,  setDarkMode]  = useState(true);
 
@@ -92,18 +92,19 @@ function AdminDashboard({ setDashboard, setPage, page }) {
   /* ── Load dashboard data ─────────────────────────────────────────── */
   const loadDashboardData = async () => {
     try {
+      // Normalize semester to "Sem1" format for DB
+      const normalizedSem = semester ? (semester.toLowerCase().startsWith('sem') ? semester : `Sem${semester}`) : '';
+      
+      const filters = {
+        course: course || 'MCA',
+        ...(normalizedSem && { semester: normalizedSem }),
+        ...(examType && { exam_type: examType })
+      };
+      
       const [statsRes, leaderboardRes, analyticsRes, annRes] = await Promise.all([
-        adminAPI.getStats({
-        course,
-        semester,
-        exam_type: examType
-      }),
-        adminAPI.getLeaderboard({course,
-        semester,
-        exam_type: examType }),
-        adminAPI.getAnalytics({ course,
-        semester,
-        exam_type: examType }),
+        adminAPI.getStats(filters),
+        adminAPI.getLeaderboard(filters),
+        adminAPI.getAnalytics(filters),
         adminAPI.getAnnouncements(),
       ]);
       setStats(statsRes);
@@ -124,7 +125,7 @@ function AdminDashboard({ setDashboard, setPage, page }) {
     setExamType(pendingExamType);
   };
 
-  useEffect(() => { loadDashboardData(); }, [course]); // eslint-disable-line
+  useEffect(() => { loadDashboardData(); }, [course, semester, examType]); // eslint-disable-line
 
   /* ── Profile listeners ───────────────────────────────────────────── */
   useEffect(() => {
@@ -274,7 +275,7 @@ function AdminDashboard({ setDashboard, setPage, page }) {
       </button>
       {/* Applied badge */}
       <div style={{ marginTop:20, fontSize:12, color:T.success, fontWeight:600, background: darkMode?"#14532d22":"#dcfce7", padding:"8px 14px", borderRadius:8, border:`1px solid ${T.success}40` }}>
-        ✓ {course} · Sem {semester} · {examType}
+        ✓ {course} {semester ? `· Sem ${semester}` : ''} {examType ? `· ${examType}` : ''}
       </div>
     </div>
   );
@@ -455,7 +456,7 @@ function AdminDashboard({ setDashboard, setPage, page }) {
               {/* Pass vs Fail */}
               <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"22px 24px" }}>
                 <div style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:4 }}>Pass vs Fail</div>
-                <div style={{ fontSize:12, color:T.textSub, marginBottom:16 }}>{course} · Sem {semester} · {examType}</div>
+                <div style={{ fontSize:12, color:T.textSub, marginBottom:16 }}>{course} {semester ? `· Sem ${semester}` : ''} {examType ? `· ${examType}` : ''}</div>
                 <div style={{ maxHeight:240, display:"flex", justifyContent:"center" }}>
                   <Pie data={passFailData} options={{ plugins:{ legend:{ labels:{ color:T.textSub } } } }} />
                 </div>

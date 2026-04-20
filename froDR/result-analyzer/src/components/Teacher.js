@@ -9,8 +9,8 @@ function Teacher() {
 
   const [formData, setFormData] = useState({
     faculty_id: "",
-    teacherId: "",
     name: "",
+    email: "",
     course: "",
     subject: "",
     department: ""
@@ -34,23 +34,35 @@ function Teacher() {
   /* ✅ Updated: Add teacher using API */
   const addTeacher = async () => {
 
-    if (!formData.faculty_id || !formData.name || !formData.course) {
+    if (!formData.faculty_id || !formData.name || !formData.email || !formData.course) {
       alert("Please fill all required fields");
       return;
     }
 
-    await adminAPI.createUser({ ...formData, role: "faculty", faculty_id: formData.faculty_id });
+    try {
+      await adminAPI.createUser({ 
+        ...formData, 
+        role: "faculty", 
+        faculty_id: formData.faculty_id 
+      });
 
-    const updated = await adminAPI.getUsers({ role: "faculty" });
-    setTeachers(updated);
+      const updated = await adminAPI.getUsers({ role: "faculty" });
+      setTeachers(updated);
 
-    setFormData({
-      teacherId: "",
-      name: "",
-      course: "",
-      subject: "",
-      department: ""
-    });
+      setFormData({
+        faculty_id: "",
+        name: "",
+        email: "",
+        course: "",
+        subject: "",
+        department: ""
+      });
+
+      alert("Teacher added successfully!");
+    } catch (err) {
+      console.error("Add teacher error:", err);
+      alert("Failed to add teacher: " + (err.message || err));
+    }
   };
 
   /* ✅ Updated: Delete teacher using API */
@@ -86,6 +98,14 @@ function Teacher() {
           name="name"
           placeholder="Teacher Name"
           value={formData.name}
+          onChange={handleChange}
+        />
+
+        <input
+          type="email"
+          name="email"
+          placeholder="Email"
+          value={formData.email}
           onChange={handleChange}
         />
 

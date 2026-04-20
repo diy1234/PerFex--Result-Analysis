@@ -14,38 +14,65 @@ def stats():
         return jsonify({'error': 'Unauthorized'}), 403
 
     course = request.args.get('course')
+    semester = request.args.get('semester')
+    exam_type = request.args.get('exam_type')
     conn = get_db()
     
-    # Build base query with optional course filter
+    # Build base query with optional course/semester filter for students
     student_q = "SELECT COUNT(*) FROM users WHERE role='student'"
-    teacher_q = "SELECT COUNT(DISTINCT fa.faculty_id)FROM faculty_allocations fa WHERE 1=1"
+    student_params = []
     if course:
-        student_q += f" AND course=?"
-        teacher_q += f" AND course=?"
+        student_q += " AND course=?"
+        student_params.append(course)
+    if semester:
+        student_q += " AND semester=?"
+        student_params.append(semester)
+    total_students = conn.execute(student_q, student_params).fetchone()[0]
     
+    # Teachers (use course filter)
+    teacher_q = "SELECT COUNT(DISTINCT fa.faculty_id) FROM faculty_allocations fa WHERE 1=1"
+    teacher_params = []
     if course:
-        total_students = conn.execute(student_q, (course,)).fetchone()[0]
-        total_teachers = conn.execute(teacher_q, (course,)).fetchone()[0]
-    else:
-        total_students = conn.execute(student_q).fetchone()[0]
-        total_teachers = conn.execute(teacher_q).fetchone()[0]
+        teacher_q += " AND fa.course=?"
+        teacher_params.append(course)
+    total_teachers = conn.execute(teacher_q, teacher_params).fetchone()[0]
+    
+    # Marks entered - filter by course, semester, exam_type
+    marks_q = "SELECT COUNT(*) FROM marks m JOIN users u ON u.id=m.student_id WHERE 1=1"
+    marks_params = []
+    if course:
+        marks_q += " AND u.course=?"
+        marks_params.append(course)
+    if semester:
+        marks_q += " AND u.semester=?"
+        marks_params.append(semester)
+    if exam_type:
+        marks_q += " AND LOWER(m.exam_type)=LOWER(?)"
+        marks_params.append(exam_type)
+    marks_entered = conn.execute(marks_q, marks_params).fetchone()[0]
     
     data = {
         'total_students':      total_students,
         'total_teachers':      total_teachers,
         'total_subjects':      conn.execute("SELECT COUNT(*) FROM subjects").fetchone()[0],
         'total_announcements': conn.execute("SELECT COUNT(*) FROM announcements").fetchone()[0],
-        'marks_entered':       conn.execute("SELECT COUNT(*) FROM marks WHERE student_id IN (SELECT id FROM users WHERE course=?)", (course,)).fetchone()[0] if course else conn.execute("SELECT COUNT(*) FROM marks").fetchone()[0],
+        'marks_entered':       marks_entered,
         'pending_queries':     conn.execute("SELECT COUNT(*) FROM queries WHERE status='Pending'").fetchone()[0],
     }
     
-    avg_marks_q = "SELECT ROUND(AVG(marks),2) FROM marks"
+    # Average marks - filter by course, semester, exam_type
+    avg_marks_q = "SELECT ROUND(AVG(m.marks),2) FROM marks m JOIN users u ON u.id=m.student_id WHERE 1=1"
+    avg_params = []
     if course:
-        avg_marks_q += " WHERE student_id IN (SELECT id FROM users WHERE course=?)"
-        avg_marks = conn.execute(avg_marks_q, (course,)).fetchone()[0]
-    else:
-        avg_marks = conn.execute(avg_marks_q).fetchone()[0]
-
+        avg_marks_q += " AND u.course=?"
+        avg_params.append(course)
+    if semester:
+        avg_marks_q += " AND u.semester=?"
+        avg_params.append(semester)
+    if exam_type:
+        avg_marks_q += " AND LOWER(m.exam_type)=LOWER(?)"
+        avg_params.append(exam_type)
+    avg_marks = conn.execute(avg_marks_q, avg_params).fetchone()[0]
     data['average_marks'] = avg_marks or 0
 
     conn.close()
@@ -100,7 +127,14 @@ def create_user():
         conn.commit()
     except Exception as e:
         conn.close()
-        return jsonify({'error': str(e)}), 409
+        error_msg = str(e)
+        if 'UNIQUE constraint failed' in error_msg and 'email' in error_msg:
+            return jsonify({'error': f'Email {email} already exists'}), 409
+        elif 'UNIQUE constraint failed' in error_msg and 'enroll' in error_msg:
+            enroll = d.get('enroll', 'unknown')
+            return jsonify({'error': f'Enrollment {enroll} already exists'}), 409
+        else:
+            return jsonify({'error': error_msg}), 409
     conn.close()
     return jsonify({'message': f'{name} added. Default password: {pwd}'}), 201
 
@@ -217,7 +251,7 @@ def update_profile():
     return jsonify({'message': 'Profile updated'})
 
 
-# ── GET /api/admin/leaderboard?course=MCA&session=2024-25 ────────────────────
+# ── GET /api/admin/leaderboard?course=MCA&semester=Sem1&exam_type=CIE1 ────────────────────
 @admin_bp.route('/leaderboard', methods=['GET'])
 @token_required
 def leaderboard():
@@ -226,19 +260,30 @@ def leaderboard():
         return jsonify({'error': 'Unauthorized'}), 403
     
     course = request.args.get('course', 'MCA')
-    conn   = get_db()
+    semester = request.args.get('semester')
+    exam_type = request.args.get('exam_type')
+    conn = get_db()
 
-    students = conn.execute(
-        "SELECT id, name, course FROM users WHERE role='student' AND course=? ORDER BY name",
-        (course,)
-    ).fetchall()
+    # Build student query with course and semester filters
+    student_q = "SELECT id, name, course FROM users WHERE role='student' AND course=?"
+    student_params = [course]
+    if semester:
+        student_q += " AND semester=?"
+        student_params.append(semester)
+    student_q += " ORDER BY name"
+    
+    students = conn.execute(student_q, student_params).fetchall()
 
     result = []
     for st in students:
-        avg = conn.execute(
-            "SELECT ROUND(AVG(marks),1) AS avg FROM marks WHERE student_id=?",
-            (st['id'],)
-        ).fetchone()
+        # Build marks query with optional exam_type filter
+        marks_q = "SELECT ROUND(AVG(marks),1) AS avg FROM marks WHERE student_id=?"
+        marks_params = [st['id']]
+        if exam_type:
+            marks_q += " AND LOWER(exam_type)=LOWER(?)"
+            marks_params.append(exam_type)
+        
+        avg = conn.execute(marks_q, marks_params).fetchone()
         result.append({
             'name':   st['name'],
             'course': st['course'],
@@ -316,7 +361,7 @@ def post_announcement():
     return jsonify({'message': 'Posted'}), 201
 
 
-# ── GET /api/admin/analytics ───────────────────────────────────────────────
+# ── GET /api/admin/analytics?course=MCA&semester=Sem1&exam_type=CIE1 ───────────────────────
 @admin_bp.route('/analytics', methods=['GET'])
 @token_required
 def analytics():
@@ -325,29 +370,35 @@ def analytics():
         return jsonify({'error': 'Unauthorized'}), 403
     
     course = request.args.get('course')
+    semester = request.args.get('semester')
+    exam_type = request.args.get('exam_type')
     conn = get_db()
 
+    # Build query with optional filters
+    q = """
+    SELECT s.name,
+           ROUND(AVG(m.marks),2) as avg_marks,
+           ROUND(100.0 * SUM(CASE WHEN m.marks >= 40 THEN 1 ELSE 0 END) / COUNT(*), 1) as pass_rate
+    FROM marks m
+    JOIN subjects s ON s.id = m.subject_id
+    JOIN users u ON u.id = m.student_id
+    WHERE 1=1
+    """
+    params = []
+    
     if course:
-        subjects = conn.execute("""
-        SELECT s.name,
-               ROUND(AVG(m.marks),2) as avg_marks,
-               ROUND(100.0 * SUM(CASE WHEN m.marks >= 40 THEN 1 ELSE 0 END) / COUNT(*), 1) as pass_rate
-        FROM marks m
-        JOIN subjects s ON s.id = m.subject_id
-        JOIN users u ON u.id = m.student_id
-        WHERE u.course = ?
-        GROUP BY s.id
-        """, (course,)).fetchall()
-    else:
-        subjects = conn.execute("""
-        SELECT s.name,
-               ROUND(AVG(m.marks),2) as avg_marks,
-               ROUND(100.0 * SUM(CASE WHEN m.marks >= 40 THEN 1 ELSE 0 END) / COUNT(*), 1) as pass_rate
-        FROM marks m
-        JOIN subjects s ON s.id = m.subject_id
-        GROUP BY s.id
-        """).fetchall()
-
+        q += " AND u.course = ?"
+        params.append(course)
+    if semester:
+        q += " AND u.semester = ?"
+        params.append(semester)
+    if exam_type:
+        q += " AND LOWER(m.exam_type) = LOWER(?)"
+        params.append(exam_type)
+    
+    q += " GROUP BY s.id"
+    
+    subjects = conn.execute(q, params).fetchall()
     conn.close()
 
     return jsonify([dict(r) for r in subjects])

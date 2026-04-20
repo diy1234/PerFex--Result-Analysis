@@ -132,6 +132,7 @@ def get_announcements():
 
     rows = conn.execute("""
         SELECT a.*, a.class AS section, u.name AS posted_by_name,
+               COALESCE(a.file_path, a.attachment) AS file_path,
                CASE WHEN ar.id IS NOT NULL THEN 1 ELSE 0 END AS read
         FROM announcements a
         LEFT JOIN users u ON u.id = a.posted_by
@@ -208,13 +209,13 @@ def mark_all_announcements_read():
 @token_required
 def download_announcement_file(ann_id):
     conn = get_db()
-    ann = conn.execute("SELECT attachment FROM announcements WHERE id=?", (ann_id,)).fetchone()
+    ann = conn.execute("SELECT COALESCE(file_path, attachment) AS file_path FROM announcements WHERE id=?", (ann_id,)).fetchone()
     conn.close()
     
-    if not ann or not ann['attachment']:
+    if not ann or not ann['file_path']:
         return jsonify({'error': 'File not found'}), 404
     
-    file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ann['attachment'])
+    file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ann['file_path'])
     if not os.path.exists(file_path):
         return jsonify({'error': 'File not found'}), 404
     
