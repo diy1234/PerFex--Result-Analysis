@@ -347,13 +347,22 @@ def post_announcement():
         file.save(filepath)
         attachment_path = f'uploads/announcements/{filename}'
 
+    # Normalize semester to "Sem1" format
+    semester = data.get('semester', '')
+    if semester and not semester.lower().startswith('sem'):
+        semester = f'Sem{semester}'
+    elif semester and semester.lower().startswith('sem'):
+        semester = semester
+    else:
+        semester = None
+
     conn = get_db()
     conn.execute("""
         INSERT INTO announcements (title, message, type, course, semester, subject, class, posted_by, attachment)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         data.get('title'), data.get('message'), data.get('type', 'Notice'),
-        data.get('course'), data.get('semester'), data.get('subject'),
+        data.get('course'), semester, data.get('subject'),
         data.get('class', 'All'), request.user_id, attachment_path
     ))
     conn.commit()

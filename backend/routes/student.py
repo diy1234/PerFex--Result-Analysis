@@ -131,8 +131,10 @@ def get_announcements():
     semestreq = semester.lower().replace('sem', '').strip()
 
     rows = conn.execute("""
-        SELECT a.*, a.class AS section, u.name AS posted_by_name,
+        SELECT a.id, a.title, a.message, a.type, a.course, a.semester, a.subject, 
+               a.class, a.date, a.posted_by, u.name AS posted_by_name,
                COALESCE(a.file_path, a.attachment) AS file_path,
+               a.class AS section,
                CASE WHEN ar.id IS NOT NULL THEN 1 ELSE 0 END AS read
         FROM announcements a
         LEFT JOIN users u ON u.id = a.posted_by
